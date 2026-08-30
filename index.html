@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Packet Field" />
+  <title>Houston Packet Field</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">OFFLINE FIELD DIRECTORY</p>
+        <h1>Houston Packet</h1>
+      </div>
+      <button id="moreBtn" class="icon-btn" aria-label="Data tools">•••</button>
+    </header>
+
+    <main>
+      <section id="directoryView" class="view active" aria-labelledby="directoryTab">
+        <div class="search-wrap">
+          <input id="searchInput" type="search" placeholder="Search callsign, alias, type, note…" autocomplete="off" />
+          <button id="addStationBtn" class="primary-btn">+ Station</button>
+        </div>
+        <div id="filterBar" class="chips" aria-label="Directory filters"></div>
+        <div class="section-heading">
+          <h2>Directory</h2>
+          <span id="stationCount" class="muted"></span>
+        </div>
+        <div id="stationList" class="card-list"></div>
+      </section>
+
+      <section id="mapView" class="view" aria-labelledby="mapTab">
+        <div class="section-heading">
+          <div>
+            <h2>Network Map</h2>
+            <p class="muted">Known routes from your field observations.</p>
+          </div>
+          <button id="fitMapBtn" class="secondary-btn">Reset view</button>
+        </div>
+        <div class="map-card">
+          <svg id="networkSvg" viewBox="0 0 900 620" role="img" aria-label="Packet network route graph"></svg>
+        </div>
+        <p class="small muted">Tap a node for details. Dashed links are unconfirmed or failed routes.</p>
+      </section>
+
+      <section id="logView" class="view" aria-labelledby="logTab">
+        <div class="section-heading">
+          <div>
+            <h2>Field Log</h2>
+            <p class="muted">Fast notes about what worked and what didn’t.</p>
+          </div>
+          <button id="addLogBtn" class="primary-btn">+ Log</button>
+        </div>
+        <div id="logList" class="card-list"></div>
+      </section>
+
+      <section id="referenceView" class="view" aria-labelledby="referenceTab">
+        <div class="section-heading">
+          <div>
+            <h2>Quick Reference</h2>
+            <p class="muted">Common packet/node/BBS commands. Exact behavior varies by software.</p>
+          </div>
+        </div>
+        <div id="referenceList" class="reference-grid"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar" aria-label="Primary">
+      <button id="directoryTab" class="tab active" data-view="directoryView"><span>⌕</span>Directory</button>
+      <button id="mapTab" class="tab" data-view="mapView"><span>⌘</span>Map</button>
+      <button id="logTab" class="tab" data-view="logView"><span>✎</span>Log</button>
+      <button id="referenceTab" class="tab" data-view="referenceView"><span>?</span>Commands</button>
+    </nav>
+  </div>
+
+  <dialog id="stationDialog" class="sheet">
+    <form id="stationForm" method="dialog">
+      <div class="sheet-head">
+        <div>
+          <p class="eyebrow">STATION RECORD</p>
+          <h2 id="stationDialogTitle">Add station</h2>
+        </div>
+        <button type="button" class="icon-btn close-dialog">×</button>
+      </div>
+      <input type="hidden" id="stationId" />
+      <div class="form-grid">
+        <label>Callsign / primary name<input id="stationCall" required placeholder="WR5GC" /></label>
+        <label>Alias<input id="stationAlias" placeholder="BIGBOY" /></label>
+        <label>Type
+          <select id="stationType">
+            <option>Node</option><option>BBS</option><option>Chat</option><option>Digipeater</option><option>Other</option>
+          </select>
+        </label>
+        <label>Status
+          <select id="stationStatus">
+            <option value="worked">Worked</option>
+            <option value="observed">Observed</option>
+            <option value="failed">No response</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </label>
+        <label>Frequency<input id="stationFrequency" placeholder="e.g. 145.050 MHz" /></label>
+        <label>Last tested<input id="stationLastTested" type="date" /></label>
+      </div>
+      <label>Known route / connect path<input id="stationRoute" placeholder="HOME → BIGBOY → FOXHOP" /></label>
+      <label>Commands<textarea id="stationCommands" rows="3" placeholder="C FOXHOP\nJ"></textarea></label>
+      <label>Notes<textarea id="stationNotes" rows="5" placeholder="Field observations…"></textarea></label>
+      <div class="sheet-actions">
+        <button type="button" id="deleteStationBtn" class="danger-btn hidden">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="secondary-btn close-dialog">Cancel</button>
+        <button type="submit" class="primary-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="logDialog" class="sheet">
+    <form id="logForm" method="dialog">
+      <div class="sheet-head">
+        <div><p class="eyebrow">FIELD NOTE</p><h2>Add log entry</h2></div>
+        <button type="button" class="icon-btn close-dialog">×</button>
+      </div>
+      <div class="form-grid">
+        <label>Date & time<input id="logDate" type="datetime-local" required /></label>
+        <label>Station<input id="logStation" placeholder="TARNOD" /></label>
+        <label>Status
+          <select id="logStatus"><option value="worked">Worked</option><option value="failed">No response</option><option value="observed">Observed</option></select>
+        </label>
+        <label>Route<input id="logRoute" placeholder="via BIGBOY" /></label>
+      </div>
+      <label>Note<textarea id="logNote" rows="5" required placeholder="What happened?"></textarea></label>
+      <div class="sheet-actions"><span class="spacer"></span><button type="button" class="secondary-btn close-dialog">Cancel</button><button type="submit" class="primary-btn">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" class="sheet detail-sheet">
+    <div id="detailContent"></div>
+  </dialog>
+
+  <dialog id="toolsDialog" class="sheet">
+    <div class="sheet-head">
+      <div><p class="eyebrow">DATA TOOLS</p><h2>Backup & install</h2></div>
+      <button type="button" class="icon-btn close-dialog">×</button>
+    </div>
+    <div class="tool-stack">
+      <button id="exportBtn" class="secondary-btn wide">Export JSON backup</button>
+      <label class="secondary-btn wide file-label">Import JSON backup<input id="importInput" type="file" accept="application/json" hidden /></label>
+      <button id="resetBtn" class="danger-btn wide">Reset to starter data</button>
+      <div class="install-note">
+        <strong>Install on iPhone</strong>
+        <p>Open the deployed site in Safari → Share → <b>Add to Home Screen</b>. Once loaded, the directory and saved data work offline.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
