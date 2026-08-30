@@ -1,13 +1,16 @@
 {
-  "name": "Houston Packet Field",
-  "short_name": "Packet Field",
-  "description": "Offline-first Houston packet-radio node, BBS, route, and field-log directory.",
+  "name": "Houston Packet Field — Thomas Hopkins",
+  "short_name": "Houston Packet",
+  "description": "Offline packet-radio field directory, route finder, discovery notebook, and connection log developed by Thomas Hopkins.",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#08101d",
-  "theme_color": "#0b1220",
+  "orientation": "portrait-primary",
+  "background_color": "#06101a",
+  "theme_color": "#07131f",
+  "categories": ["utilities", "productivity"],
   "icons": [
-    {"src":"icon-192.png","sizes":"192x192","type":"image/png"},
-    {"src":"icon-512.png","sizes":"512x512","type":"image/png"}
+    {"src":"icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
   ]
 }

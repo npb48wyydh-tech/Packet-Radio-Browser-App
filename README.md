@@ -1,39 +1,49 @@
-# Houston Packet Field
+# Houston Packet Field v2
 
-A small offline-first PWA for keeping a personal packet-radio directory, known connection routes, quick command reference, and field observations.
+**Developed by Thomas Hopkins**
 
-## Run locally
+An offline-first Progressive Web App for maintaining a personal packet-radio directory, routes, aliases, connection history, command references, equipment profiles, and field observations.
 
-Because service workers require HTTP/HTTPS, don't open `index.html` directly with `file://` if you want offline caching.
+## V2 highlights
 
-From this folder, run one of these:
+- Field Mode quick actions and retest queue
+- Multiple routes per station and connection history
+- Offline path finder using confirmed topology records
+- Aliases, confidence/source, favorites, watch list, stale-record warnings
+- Interactive network graph with station-type shapes
+- Software-specific command cards: General, BPQ, KA-Node, FBB, Chat
+- Equipment profiles and per-log equipment/power/frequency/location
+- Frequency, baud, grid, coordinates, sysop, and service fields
+- Optional on-device distance sorting when location permission is requested
+- BBS and chat-specific record fields, including last activity/login, message-waiting notes, forwarding partners, and regulars
+- Discovery Mode parser for pasted J/NODES/MHEARD-style terminal output
+- Optional compressed screenshot/photo attachments in connection logs
+- JSON full-fidelity backup/import plus CSV table export/import
+- Red-light field display mode
+- Offline/update-aware PWA shell
+- V1 local-data migration when upgrading on the same browser/origin
+- Thomas Hopkins branding in the header, about screen, app metadata, and icon monogram
+- Native Share Sheet / clipboard sharing for individual station and route summaries
+- Separate last-heard and last-tested timestamps
 
-```bash
-python3 -m http.server 8080
-```
+## Privacy / storage model
 
-Then open `http://localhost:8080` in a browser.
+There is **no cloud sync and no account**. Data stays in browser local storage. Location is only requested when the user taps **Near me** and is kept in memory for that session. Log screenshots are compressed and stored locally.
 
-## Put it on an iPhone
+Browser local storage is finite; many image attachments can fill it. Use JSON backups periodically, especially before clearing Safari website data or changing hosting URLs.
 
-Deploy the folder to any static HTTPS host (GitHub Pages, Cloudflare Pages, Netlify, etc.). Open that URL in Safari, tap **Share → Add to Home Screen**. After the first successful load, the app shell works offline.
+## Deploy to GitHub Pages
 
-## Data
+Upload all files in this folder to the repository root. In GitHub:
 
-Your edits are stored in browser `localStorage` on that device/browser. Use **••• → Export JSON backup** periodically. Import restores a backup. Clearing Safari website data can erase local data, so exports matter.
+1. **Settings → Pages**
+2. Source: **Deploy from a branch**
+3. Branch: **main**
+4. Folder: **/(root)**
+5. Save
 
-## Starter observations
+After GitHub publishes it, open the Pages URL in Safari and choose **Share → Add to Home Screen**.
 
-The included seed data is intentionally conservative and based on recent manual testing: BIGBOY, WR5GC, FOXHOP, TARNOD, LCCHAT, LCITY, TARBOX, and GC. Frequencies are left blank where they were not firmly established.
+## Important limitation
 
-## V1 scope
-
-- Search/filter station directory
-- Add/edit/delete station records
-- Known-route graph
-- Field log
-- Command reference
-- JSON backup/restore
-- Offline PWA caching
-
-No internet lookup or radio control is performed by this version.
+The Path Finder is a graph search over routes the user has entered or confirmed. It is not a propagation model and does not guarantee that a radio path is currently usable.

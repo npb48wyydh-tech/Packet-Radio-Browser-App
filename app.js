@@ -1,203 +1,224 @@
-const STORAGE_KEY = 'houstonPacketField.v1';
-
-const starterData = {
-  stations: [
-    { id:'bigboy', call:'BIGBOY', alias:'', type:'Node', status:'worked', frequency:'', lastTested:'2026-08-27', route:'HOME → BIGBOY', commands:'J', notes:'Primary Houston-area node used as a stepping stone during recent tests.' },
-    { id:'wr5gc', call:'WR5GC', alias:'', type:'Node', status:'worked', frequency:'', lastTested:'2026-08-27', route:'via BIGBOY', commands:'', notes:'A connection reached WR5GC during testing.' },
-    { id:'foxhop', call:'FOXHOP', alias:'', type:'Node', status:'worked', frequency:'', lastTested:'2026-08-27', route:'HOME → BIGBOY → FOXHOP', commands:'C FOXHOP', notes:'Confirmed reachable through BIGBOY.' },
-    { id:'tarnod', call:'TARNOD', alias:'', type:'Node', status:'worked', frequency:'', lastTested:'2026-08-27', route:'HOME → BIGBOY → TARNOD', commands:'C TARNOD', notes:'Confirmed working through BIGBOY.' },
-    { id:'lcchat', call:'LCCHAT', alias:'', type:'Chat', status:'observed', frequency:'', lastTested:'2026-08-27', route:'via BIGBOY / discovered in node listings', commands:'C LCCHAT', notes:'Discovered during testing. Keep participation/room-specific commands here as they are confirmed.' },
-    { id:'lcity', call:'LCITY', alias:'', type:'Node', status:'failed', frequency:'', lastTested:'2026-08-27', route:'via BIGBOY', commands:'C LCITY', notes:'No useful response during the recent test.' },
-    { id:'tarbox', call:'TARBOX', alias:'', type:'BBS', status:'failed', frequency:'', lastTested:'2026-08-27', route:'via BIGBOY', commands:'C TARBOX', notes:'Did not work during the recent test; TARNOD did.' },
-    { id:'gc', call:'GC', alias:'', type:'Other', status:'failed', frequency:'', lastTested:'2026-08-27', route:'from connected node', commands:'C GC', notes:'Produced no response during testing.' }
-  ],
-  edges: [
-    { from:'bigboy', to:'wr5gc', status:'worked' },
-    { from:'bigboy', to:'foxhop', status:'worked' },
-    { from:'bigboy', to:'tarnod', status:'worked' },
-    { from:'bigboy', to:'lcchat', status:'observed' },
-    { from:'bigboy', to:'lcity', status:'failed' },
-    { from:'bigboy', to:'tarbox', status:'failed' }
-  ],
-  logs: [
-    { id:'log1', date:'2026-08-27T12:00', station:'FOXHOP', status:'worked', route:'via BIGBOY', note:'Confirmed FOXHOP reachable through BIGBOY.' },
-    { id:'log2', date:'2026-08-27T12:10', station:'TARNOD', status:'worked', route:'via BIGBOY', note:'TARNOD worked; TARBOX did not.' },
-    { id:'log3', date:'2026-08-27T12:20', station:'LCCHAT', status:'observed', route:'via BIGBOY', note:'Found LCCHAT during node exploration.' }
-  ]
-};
-
-const commandReference = [
-  ['C <CALL>', 'Connect to a callsign or alias. Example: C FOXHOP.'],
-  ['J', 'Often shows heard stations, routes, or node information. Exact meaning varies by node software.'],
-  ['L', 'Commonly lists BBS messages or available items.'],
-  ['R <#>', 'Common BBS pattern for reading a numbered message.'],
-  ['SP <CALL>', 'Common BBS pattern for sending a private message to a callsign.'],
-  ['SB <CALL>', 'Common BBS pattern for forwarding/sending a bulletin or message; syntax varies.'],
-  ['B', 'Commonly disconnects from a BBS/node (Bye).'],
-  ['?', 'Usually displays local help/command list. Use this first on an unfamiliar system.']
-];
-
-let data = loadData();
-let activeFilter = 'All';
-
+'use strict';
+const APP_VERSION = '2.0.0';
+const STORAGE_KEY = 'houstonPacketField.v2';
+const LEGACY_KEY = 'houstonPacketField.v1';
+const HOME_ID = '__home__';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 
-function loadData() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || structuredClone(starterData); }
-  catch { return structuredClone(starterData); }
-}
-function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-function esc(s='') { return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-function statusLabel(s) { return ({worked:'Worked',failed:'No response',observed:'Observed',unknown:'Unknown'})[s] || s; }
-function formatDate(s) { if (!s) return '—'; const d = new Date(s.includes('T') ? s : s+'T12:00'); return new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',year:'numeric',hour:s.includes('T')?'numeric':undefined,minute:s.includes('T')?'2-digit':undefined}).format(d); }
-function makeId(base) { return (base || 'station').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') + '-' + Math.random().toString(36).slice(2,6); }
+const commandProfiles = {
+  General: [
+    ['?', 'Show local help. Best first command on an unfamiliar system.'],
+    ['C <CALL>', 'Connect to a callsign or alias. Example: C FOXHOP.'],
+    ['J / NODES', 'Often lists nodes, routes, or heard stations; exact meaning varies.'],
+    ['MHEARD', 'Common command for recently heard stations when supported.'],
+    ['B', 'Commonly means Bye / disconnect.']
+  ],
+  BPQ: [
+    ['NODES', 'Show known node destinations.'], ['PORTS', 'List configured radio/network ports.'], ['USERS', 'Show current node users.'],
+    ['C <CALL>', 'Connect to a node/service.'], ['BBS', 'Enter local BBS when configured.'], ['CHAT', 'Enter chat service when configured.'], ['BYE', 'Leave the node.']
+  ],
+  'KA-Node': [
+    ['C <CALL>', 'Connect to another node or station.'], ['J', 'Show node/route information on many KA-Node systems.'],
+    ['MHEARD', 'Show recently heard stations when enabled.'], ['?', 'Display this node’s actual supported command set.'], ['B', 'Disconnect / bye on many systems.']
+  ],
+  'FBB': [
+    ['L', 'List messages. Variants such as LR/LM may filter lists.'], ['R <#>', 'Read a numbered message.'], ['SP <CALL>', 'Send a private message.'],
+    ['SB <TOPIC>', 'Send a bulletin; addressing syntax varies by system.'], ['K <#>', 'Kill/delete a message when permitted.'], ['B', 'Bye / disconnect.']
+  ],
+  Chat: [
+    ['?', 'Show the room/server’s local commands.'], ['C <CHAT>', 'Connect to the chat service from a node.'],
+    ['<text>', 'Many packet chats treat ordinary lines as room messages after joining.'], ['B / BYE', 'Common exit command; confirm with local help.']
+  ]
+};
 
-function renderFilters() {
-  const types = ['All','Worked','No response','Node','BBS','Chat'];
-  $('#filterBar').innerHTML = types.map(t => `<button class="chip ${t===activeFilter?'active':''}" data-filter="${esc(t)}">${esc(t)}</button>`).join('');
-  $$('#filterBar .chip').forEach(b => b.onclick = () => { activeFilter = b.dataset.filter; renderFilters(); renderStations(); });
+const starterData = {
+  schema: 2,
+  version: APP_VERSION,
+  settings: { staleDays: 14, redMode: false },
+  stations: [
+    {id:'bigboy',call:'BIGBOY',aliases:[],type:'Node',status:'worked',confidence:'confirmed',software:'General',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'Houston area',sysop:'',services:['NODE'],commands:'J',notes:'Primary Houston-area node used as a stepping stone during recent tests.',favorite:true,watch:false,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}},
+    {id:'wr5gc',call:'WR5GC',aliases:[],type:'Node',status:'worked',confidence:'confirmed',software:'General',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['NODE'],commands:'',notes:'A connection reached WR5GC during testing.',favorite:false,watch:false,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}},
+    {id:'foxhop',call:'FOXHOP',aliases:[],type:'Node',status:'worked',confidence:'confirmed',software:'General',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['NODE'],commands:'C FOXHOP',notes:'Confirmed reachable through BIGBOY.',favorite:true,watch:false,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}},
+    {id:'tarnod',call:'TARNOD',aliases:[],type:'Node',status:'worked',confidence:'confirmed',software:'General',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['NODE'],commands:'C TARNOD',notes:'Confirmed working through BIGBOY.',favorite:true,watch:false,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}},
+    {id:'lcchat',call:'LCCHAT',aliases:[],type:'Chat',status:'observed',confidence:'confirmed',software:'Chat',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['CHAT'],commands:'C LCCHAT',notes:'Discovered during testing. Record participation commands as they are confirmed.',favorite:true,watch:true,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'2026-08-27T12:20',regulars:'',instructions:'Connect to LCCHAT, then use ? or local help to confirm room-specific commands.',notes:'Activity observed during node exploration.'}},
+    {id:'lcity',call:'LCITY',aliases:[],type:'Node',status:'failed',confidence:'confirmed',software:'General',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['NODE'],commands:'C LCITY',notes:'No useful response during the recent test.',favorite:false,watch:true,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}},
+    {id:'tarbox',call:'TARBOX',aliases:[],type:'BBS',status:'failed',confidence:'confirmed',software:'FBB',frequency:'',baud:'1200',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['BBS'],commands:'C TARBOX',notes:'Did not work during the recent test; TARNOD did.',favorite:false,watch:true,bbs:{name:'TARBOX',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:'Retest before relying on this BBS.'},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}},
+    {id:'gc',call:'GC',aliases:[],type:'Other',status:'failed',confidence:'confirmed',software:'General',frequency:'',baud:'',lastTested:'2026-08-27',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:[],commands:'C GC',notes:'Produced no response during testing.',favorite:false,watch:true,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}}
+  ],
+  routes: [
+    {id:'r-bigboy',destinationId:'bigboy',path:['HOME','BIGBOY'],status:'worked',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY',notes:'Direct known entry point.'},
+    {id:'r-wr5gc',destinationId:'wr5gc',path:['HOME','BIGBOY','WR5GC'],status:'worked',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY\nC WR5GC',notes:''},
+    {id:'r-foxhop',destinationId:'foxhop',path:['HOME','BIGBOY','FOXHOP'],status:'worked',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY\nC FOXHOP',notes:''},
+    {id:'r-tarnod',destinationId:'tarnod',path:['HOME','BIGBOY','TARNOD'],status:'worked',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY\nC TARNOD',notes:''},
+    {id:'r-lcchat',destinationId:'lcchat',path:['HOME','BIGBOY','LCCHAT'],status:'observed',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY\nC LCCHAT',notes:'Discovered during node exploration.'},
+    {id:'r-lcity',destinationId:'lcity',path:['HOME','BIGBOY','LCITY'],status:'failed',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY\nC LCITY',notes:'No useful response.'},
+    {id:'r-tarbox',destinationId:'tarbox',path:['HOME','BIGBOY','TARBOX'],status:'failed',lastTested:'2026-08-27',source:'confirmed',commands:'C BIGBOY\nC TARBOX',notes:'TARBOX did not respond during this test.'}
+  ],
+  logs: [
+    {id:'log1',date:'2026-08-27T12:00',stationId:'foxhop',station:'FOXHOP',status:'worked',routeId:'r-foxhop',route:'HOME → BIGBOY → FOXHOP',equipmentId:'uvpro',power:'',frequency:'',location:'Home',note:'Confirmed FOXHOP reachable through BIGBOY.',image:''},
+    {id:'log2',date:'2026-08-27T12:10',stationId:'tarnod',station:'TARNOD',status:'worked',routeId:'r-tarnod',route:'HOME → BIGBOY → TARNOD',equipmentId:'uvpro',power:'',frequency:'',location:'Home',note:'TARNOD worked; TARBOX did not.',image:''},
+    {id:'log3',date:'2026-08-27T12:20',stationId:'lcchat',station:'LCCHAT',status:'observed',routeId:'r-lcchat',route:'HOME → BIGBOY → LCCHAT',equipmentId:'uvpro',power:'',frequency:'',location:'Home',note:'Found LCCHAT during node exploration.',image:''}
+  ],
+  equipment: [
+    {id:'uvpro',name:'BTECH UV-PRO',power:'',antenna:'Handheld antenna',interface:'Packet Commander / phone',notes:'Portable packet setup.'},
+    {id:'jeep',name:'Jeep mobile setup',power:'',antenna:'Mobile antenna',interface:'',notes:'Higher-performance field/mobile profile; customize with actual radio.'}
+  ]
+};
+
+let data = loadData();
+let activeFilter = 'All';
+let activeCommandProfile = 'General';
+let userLocation = null;
+let pendingImage = '';
+
+function clone(v){return JSON.parse(JSON.stringify(v));}
+function makeId(base='item'){return `${String(base).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'item'}-${Math.random().toString(36).slice(2,7)}`;}
+function esc(s=''){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function upper(s=''){return s.trim().toUpperCase();}
+function statusLabel(s){return ({worked:'Worked',failed:'No response',observed:'Observed',unknown:'Unknown'})[s]||s;}
+function confidenceLabel(s){return ({confirmed:'Confirmed by me',reported:'Reported',directory:'Published/directory',unknown:'Unknown'})[s]||s;}
+function formatDate(s){if(!s)return '—';const d=new Date(s.includes('T')?s:s+'T12:00');if(Number.isNaN(d.getTime()))return s;return new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',year:'numeric',hour:s.includes('T')?'numeric':undefined,minute:s.includes('T')?'2-digit':undefined}).format(d);}
+function daysAgo(s){if(!s)return Infinity;const d=new Date(s.includes('T')?s:s+'T12:00');return Math.floor((Date.now()-d.getTime())/86400000);}
+function isStale(s){return daysAgo(s.lastTested) > Number(data.settings?.staleDays||14);}
+function stationById(id){return data.stations.find(s=>s.id===id);}
+function stationByName(name){const n=upper(name);return data.stations.find(s=>s.call===n || (s.aliases||[]).includes(n));}
+function routeString(r){return (r?.path||[]).join(' → ');}
+function parsePath(text){return text.split(/\s*(?:→|>|=>|,|\/)\s*/).map(upper).filter(Boolean);}
+function equipmentById(id){return data.equipment.find(e=>e.id===id);}
+function today(){return new Date().toISOString().slice(0,10);}
+function localNow(){const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,16);}
+function slugName(s){return String(s||'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase();}
+
+function migrateLegacy(v1){
+  const out=clone(starterData); out.stations=[]; out.routes=[]; out.logs=[];
+  const legacyStations=v1.stations||[];
+  out.stations=legacyStations.map(s=>({id:s.id||makeId(s.call),call:upper(s.call),aliases:s.alias?[upper(s.alias)]:[],type:s.type||'Other',status:s.status||'unknown',confidence:'confirmed',software:s.type==='BBS'?'FBB':s.type==='Chat'?'Chat':'General',frequency:s.frequency||'',baud:'1200',lastTested:s.lastTested||'',lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:s.type==='BBS'?['BBS']:s.type==='Chat'?['CHAT']:[s.type==='Node'?'NODE':''].filter(Boolean),commands:s.commands||'',notes:s.notes||'',favorite:false,watch:s.status==='failed',bbs:{name:s.type==='BBS'?upper(s.call):'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}}));
+  legacyStations.forEach(s=>{if(s.route){out.routes.push({id:makeId('route'),destinationId:s.id,path:parsePath(s.route.replace(/^via\s+/i,'HOME → ')),status:s.status||'unknown',lastTested:s.lastTested||'',source:'confirmed',commands:s.commands||'',notes:'Migrated from V1 route field.'});}});
+  out.logs=(v1.logs||[]).map(l=>{const s=stationByNameFor(out,l.station);return{id:l.id||makeId('log'),date:l.date||'',stationId:s?.id||'',station:upper(l.station),status:l.status||'observed',routeId:'',route:l.route||'',equipmentId:'',power:'',frequency:'',location:'',note:l.note||'',image:''};});
+  return out;
+}
+function stationByNameFor(dataset,name){const n=upper(name);return dataset.stations.find(s=>s.call===n||(s.aliases||[]).includes(n));}
+function normalizeData(d){
+  d.schema=2; d.version=APP_VERSION; d.settings={staleDays:14,redMode:false,...(d.settings||{})}; d.stations=d.stations||[]; d.routes=d.routes||[]; d.logs=d.logs||[]; d.equipment=d.equipment||clone(starterData.equipment);
+  d.stations=d.stations.map(s=>({...clone(starterData.stations[0]),...s,aliases:Array.isArray(s.aliases)?s.aliases:(s.alias?[upper(s.alias)]:[]),services:Array.isArray(s.services)?s.services:String(s.services||'').split(',').map(upper).filter(Boolean),bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:'',...(s.bbs||{})},chat:{lastActivity:'',regulars:'',instructions:'',notes:'',...(s.chat||{})}}));
+  return d;
+}
+function loadData(){
+  try{const v2=localStorage.getItem(STORAGE_KEY);if(v2)return normalizeData(JSON.parse(v2));const legacy=localStorage.getItem(LEGACY_KEY);if(legacy){const d=migrateLegacy(JSON.parse(legacy));localStorage.setItem(STORAGE_KEY,JSON.stringify(d));return d;}}catch(e){console.warn(e);}return clone(starterData);
+}
+function saveData(){data.version=APP_VERSION;try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}catch(e){alert('Local storage is full. Large log screenshots are the usual cause. Export a backup, remove some attachments, and try again.');throw e;}}
+
+function routeForStation(id){return data.routes.filter(r=>r.destinationId===id).sort((a,b)=>(b.lastTested||'').localeCompare(a.lastTested||''));}
+function successRate(id){const logs=data.logs.filter(l=>l.stationId===id && ['worked','failed'].includes(l.status));if(!logs.length)return null;return Math.round(100*logs.filter(l=>l.status==='worked').length/logs.length);}
+function distanceMiles(a,b){const R=3958.8,toRad=x=>x*Math.PI/180;const dLat=toRad(b.lat-a.lat),dLon=toRad(b.lon-a.lon);const aa=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(aa));}
+function stationDistance(s){return userLocation && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lon)) ? distanceMiles(userLocation,{lat:Number(s.lat),lon:Number(s.lon)}) : null;}
+
+function renderFilters(){const types=['All','Favorites','Watch','Worked','No response','Node','BBS','Chat'];$('#filterBar').innerHTML=types.map(t=>`<button class="chip ${t===activeFilter?'active':''}" data-filter="${esc(t)}">${esc(t)}</button>`).join('');$$('#filterBar .chip').forEach(b=>b.onclick=()=>{activeFilter=b.dataset.filter;renderFilters();renderStations();});}
+function filteredStations(){const q=$('#searchInput').value.trim().toLowerCase();let arr=data.stations.filter(s=>{const hay=[s.call,(s.aliases||[]).join(' '),s.type,s.status,s.frequency,s.baud,s.software,s.location,s.grid,s.sysop,(s.services||[]).join(' '),s.commands,s.notes].join(' ').toLowerCase();let f=true;if(activeFilter==='Favorites')f=!!s.favorite;else if(activeFilter==='Watch')f=!!s.watch;else if(activeFilter==='Worked')f=s.status==='worked';else if(activeFilter==='No response')f=s.status==='failed';else if(activeFilter!=='All')f=s.type===activeFilter;return(!q||hay.includes(q))&&f;});const sort=$('#sortSelect').value;if(sort==='recent')arr.sort((a,b)=>(b.lastTested||'').localeCompare(a.lastTested||''));else if(sort==='frequency')arr.sort((a,b)=>(a.frequency||'zz').localeCompare(b.frequency||'zz'));else if(sort==='distance')arr.sort((a,b)=>(stationDistance(a)??Infinity)-(stationDistance(b)??Infinity));else arr.sort((a,b)=>a.call.localeCompare(b.call));return arr;}
+function renderStations(){const stations=filteredStations();$('#stationCount').textContent=`${stations.length} station${stations.length===1?'':'s'}`;$('#stationList').innerHTML=stations.length?stations.map(s=>{const routes=routeForStation(s.id),best=routes.find(r=>r.status==='worked')||routes[0];const dist=stationDistance(s);return`<button class="station-card" data-id="${esc(s.id)}"><div class="station-main"><div class="station-name"><span class="status-dot status-${esc(s.status)}"></span><strong>${esc(s.call)}</strong>${s.favorite?'<span class="badge favorite">★</span>':''}${(s.aliases||[]).length?`<span class="aliases">${esc(s.aliases.join(' · '))}</span>`:''}</div><div class="meta-row"><span class="badge">${esc(s.type)}</span>${s.frequency?`<span class="badge">${esc(s.frequency)}</span>`:''}${s.baud?`<span class="badge">${esc(s.baud)} baud</span>`:''}${isStale(s)?'<span class="badge stale">stale</span>':''}${dist!==null?`<span class="badge">${dist.toFixed(1)} mi</span>`:''}</div><div class="confidence">${esc(confidenceLabel(s.confidence))}${s.lastTested?` · tested ${esc(formatDate(s.lastTested))}`:''}</div>${best?`<div class="route-text">${esc(routeString(best))}</div>`:''}</div><span class="chev">›</span></button>`;}).join(''):'<div class="empty">No matching stations.</div>';$$('#stationList .station-card').forEach(b=>b.onclick=()=>openDetail(b.dataset.id));}
+
+function renderField(){const fav=data.stations.filter(s=>s.favorite).slice(0,8);$('#favoriteList').innerHTML=fav.length?fav.map(s=>`<button class="compact-card" data-id="${esc(s.id)}"><strong>${esc(s.call)}</strong><span class="small muted">${esc(s.type)} · ${esc(statusLabel(s.status))}</span></button>`).join(''):'<div class="empty">Mark stations as favorites to put them here.</div>';$$('#favoriteList .compact-card').forEach(b=>b.onclick=()=>openDetail(b.dataset.id));const due=data.stations.filter(s=>s.watch||s.status==='failed'||isStale(s)).sort((a,b)=>{const aw=a.status==='failed'?0:a.watch?1:2,bw=b.status==='failed'?0:b.watch?1:2;return aw-bw||(a.lastTested||'').localeCompare(b.lastTested||'');}).slice(0,10);$('#retestCount').textContent=String(due.length);$('#retestList').innerHTML=due.length?due.map(s=>`<div class="retest-card"><div><strong>${esc(s.call)}</strong><div class="why">${s.status==='failed'?'Last test failed':s.watch?'On watch list':`Stale: ${daysAgo(s.lastTested)} days`}</div></div><button class="secondary-btn compact-btn quick-log" data-id="${esc(s.id)}">Log test</button></div>`).join(''):'<div class="empty">Nothing is due for retest.</div>';$$('.quick-log').forEach(b=>b.onclick=()=>openLogForm('worked',b.dataset.id));const recent=[...data.logs].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4);$('#recentList').innerHTML=recent.length?recent.map(logCardHtml).join(''):'<div class="empty">No connection history yet.</div>';}
+
+function openDetail(id){const s=stationById(id);if(!s)return;const routes=routeForStation(id),logs=data.logs.filter(l=>l.stationId===id).sort((a,b)=>b.date.localeCompare(a.date)),rate=successRate(id),dist=stationDistance(s);const software=s.software||'General';$('#detailContent').innerHTML=`<div class="sheet-head"><div><p class="eyebrow">${esc(s.type.toUpperCase())}</p><h2>${esc(s.call)} ${(s.aliases||[]).length?`<span class="aliases">${esc(s.aliases.join(' · '))}</span>`:''}</h2></div><button class="icon-btn" id="closeDetail">×</button></div><div class="meta-row"><span class="status-dot status-${esc(s.status)}"></span><strong>${esc(statusLabel(s.status))}</strong>${s.favorite?'<span class="badge favorite">★ Favorite</span>':''}${s.watch?'<span class="badge stale">Watch</span>':''}${rate!==null?`<span class="badge">${rate}% log success</span>`:''}</div><dl class="detail-kv"><dt>Confidence</dt><dd>${esc(confidenceLabel(s.confidence))}</dd><dt>Last tested</dt><dd>${esc(formatDate(s.lastTested))}${isStale(s)?' · stale':''}</dd><dt>Last heard</dt><dd>${esc(formatDate(s.lastHeard))}</dd><dt>Frequency</dt><dd>${esc(s.frequency||'—')}${s.baud?` · ${esc(s.baud)} baud`:''}</dd><dt>Software</dt><dd>${esc(software)}</dd><dt>Services</dt><dd>${esc((s.services||[]).join(', ')||'—')}</dd><dt>Location</dt><dd>${esc(s.location||'—')}${dist!==null?` · ${dist.toFixed(1)} mi away`:''}</dd><dt>Grid</dt><dd>${esc(s.grid||'—')}</dd><dt>Sysop</dt><dd>${esc(s.sysop||'—')}</dd></dl>${routes.length?`<div class="detail-section"><h3>Known routes</h3>${routes.map(r=>`<button class="route-card route-detail" data-route="${esc(r.id)}" style="width:100%;text-align:left;color:inherit;margin-bottom:7px"><div class="route-text">${esc(routeString(r))}</div><div class="meta-row"><span class="badge">${esc(statusLabel(r.status))}</span><span class="small muted">${esc(formatDate(r.lastTested))}</span></div></button>`).join('')}</div>`:''}${s.commands?`<div class="detail-section"><h3>Quick commands</h3><pre class="command-box">${esc(s.commands)}</pre></div>`:''}${s.type==='BBS'?`<div class="detail-section"><h3>BBS</h3><p><b>${esc(s.bbs?.name||s.call)}</b></p><p class="muted">Areas: ${esc(s.bbs?.areas||'not recorded')} · Waiting: ${esc(s.bbs?.waiting||'unknown')}</p><p class="muted">Last login: ${esc(formatDate(s.bbs?.lastLogin))}</p><p class="muted">Forwarding partners: ${esc(s.bbs?.partners||'not recorded')}</p><p class="muted">Latest seen: ${esc(s.bbs?.latest||'not recorded')}</p><p class="muted">${esc(s.bbs?.notes||'')}</p></div>`:''}${s.type==='Chat'?`<div class="detail-section"><h3>Chat</h3><p class="muted">Last activity: ${esc(formatDate(s.chat?.lastActivity))} · Regulars: ${esc(s.chat?.regulars||'not recorded')}</p><pre class="command-box">${esc(s.chat?.instructions||'No join instructions recorded yet.')}</pre><p class="muted">${esc(s.chat?.notes||'')}</p></div>`:''}<div class="detail-section"><h3>Notes</h3><p class="muted" style="white-space:pre-wrap;line-height:1.45">${esc(s.notes||'No notes yet.')}</p></div>${logs.length?`<div class="detail-section"><h3>Recent history</h3><div class="history-mini">${logs.slice(0,5).map(l=>`<div class="history-line"><span>${esc(formatDate(l.date))}</span><span>${esc(statusLabel(l.status))}</span></div>`).join('')}</div></div>`:''}<div class="sheet-actions"><button id="editFromDetail" class="secondary-btn">Edit</button><button id="logFromDetail" class="secondary-btn">Log test</button><button id="shareStationBtn" class="secondary-btn">Share</button><span class="spacer"></span><button id="detailDone" class="primary-btn">Done</button></div>`;const d=$('#detailDialog');d.showModal();$('#closeDetail').onclick=$('#detailDone').onclick=()=>d.close();$('#editFromDetail').onclick=()=>{d.close();openStationForm(id);};$('#logFromDetail').onclick=()=>{d.close();openLogForm('worked',id);};$('#shareStationBtn').onclick=()=>shareText(`${s.call} — Houston Packet`,stationShareText(s));$$('.route-detail').forEach(b=>b.onclick=()=>{d.close();openRouteForm(b.dataset.route);});}
+
+function toggleServiceFields(){const t=$('#stationType').value;$('#bbsFields').classList.toggle('hidden',t!=='BBS');$('#chatFields').classList.toggle('hidden',t!=='Chat');}
+function openStationForm(id=null){const s=id?stationById(id):null;$('#stationDialogTitle').textContent=s?'Edit station':'Add station';$('#stationId').value=s?.id||'';$('#stationCall').value=s?.call||'';$('#stationAliases').value=(s?.aliases||[]).join(', ');$('#stationType').value=s?.type||'Node';$('#stationStatus').value=s?.status||'unknown';$('#stationConfidence').value=s?.confidence||'unknown';$('#stationSoftware').value=s?.software||'General';$('#stationFrequency').value=s?.frequency||'';$('#stationBaud').value=s?.baud||'';$('#stationLastTested').value=s?.lastTested||'';$('#stationLastHeard').value=s?.lastHeard||'';$('#stationGrid').value=s?.grid||'';$('#stationLat').value=s?.lat??'';$('#stationLon').value=s?.lon??'';$('#stationLocation').value=s?.location||'';$('#stationSysop').value=s?.sysop||'';$('#stationServices').value=(s?.services||[]).join(', ');$('#stationCommands').value=s?.commands||'';$('#stationNotes').value=s?.notes||'';$('#stationFavorite').checked=!!s?.favorite;$('#stationWatch').checked=!!s?.watch;$('#stationBbsName').value=s?.bbs?.name||'';$('#stationBbsAreas').value=s?.bbs?.areas||'';$('#stationBbsLastLogin').value=s?.bbs?.lastLogin||'';$('#stationBbsWaiting').value=s?.bbs?.waiting||'unknown';$('#stationBbsPartners').value=s?.bbs?.partners||'';$('#stationBbsLatest').value=s?.bbs?.latest||'';$('#stationBbsNotes').value=s?.bbs?.notes||'';$('#stationChatLastActivity').value=s?.chat?.lastActivity||'';$('#stationChatRegulars').value=s?.chat?.regulars||'';$('#stationChatInstructions').value=s?.chat?.instructions||'';$('#stationChatNotes').value=s?.chat?.notes||'';$('#deleteStationBtn').classList.toggle('hidden',!s);toggleServiceFields();$('#stationDialog').showModal();}
+function duplicateStation(call,aliases,id){const names=[call,...aliases].filter(Boolean);return data.stations.find(s=>s.id!==id && names.some(n=>s.call===n||(s.aliases||[]).includes(n)));}
+function saveStationFromForm(){const existingId=$('#stationId').value,call=upper($('#stationCall').value),aliases=$('#stationAliases').value.split(',').map(upper).filter(Boolean);const dupe=duplicateStation(call,aliases,existingId);if(dupe&&!confirm(`${dupe.call} already uses this callsign/alias. Save anyway?`))return false;const prior=existingId?stationById(existingId):null;const station={id:existingId||makeId(call||'station'),call,aliases:[...new Set(aliases.filter(a=>a!==call))],type:$('#stationType').value,status:$('#stationStatus').value,confidence:$('#stationConfidence').value,software:$('#stationSoftware').value,frequency:$('#stationFrequency').value.trim(),baud:$('#stationBaud').value.trim(),lastTested:$('#stationLastTested').value,lastHeard:$('#stationLastHeard').value,grid:upper($('#stationGrid').value),lat:$('#stationLat').value===''?null:Number($('#stationLat').value),lon:$('#stationLon').value===''?null:Number($('#stationLon').value),location:$('#stationLocation').value.trim(),sysop:$('#stationSysop').value.trim(),services:$('#stationServices').value.split(',').map(upper).filter(Boolean),commands:$('#stationCommands').value.trim(),notes:$('#stationNotes').value.trim(),favorite:$('#stationFavorite').checked,watch:$('#stationWatch').checked,bbs:{name:$('#stationBbsName').value.trim(),areas:$('#stationBbsAreas').value.trim(),lastLogin:$('#stationBbsLastLogin').value,waiting:$('#stationBbsWaiting').value,partners:$('#stationBbsPartners').value.trim(),latest:$('#stationBbsLatest').value.trim(),notes:$('#stationBbsNotes').value.trim()},chat:{lastActivity:$('#stationChatLastActivity').value,regulars:$('#stationChatRegulars').value.trim(),instructions:$('#stationChatInstructions').value.trim(),notes:$('#stationChatNotes').value.trim()}};if(prior){data.stations[data.stations.findIndex(s=>s.id===existingId)]=station;}else data.stations.push(station);saveData();renderAll();return true;}
+function deleteStation(){const id=$('#stationId').value;if(!id)return;const s=stationById(id);if(!confirm(`Delete ${s.call}, its saved routes, and station links? Connection logs are retained as history.`))return;data.stations=data.stations.filter(x=>x.id!==id);data.routes=data.routes.filter(r=>r.destinationId!==id&&!r.path.some(p=>stationByName(p)?.id===id));data.logs.forEach(l=>{if(l.stationId===id)l.stationId='';});saveData();$('#stationDialog').close();renderAll();}
+
+function populateStationSelect(sel,includeHome=false){const el=$(sel);el.innerHTML=(includeHome?`<option value="${HOME_ID}">HOME / local station</option>`:'')+data.stations.slice().sort((a,b)=>a.call.localeCompare(b.call)).map(s=>`<option value="${esc(s.id)}">${esc(s.call)}${(s.aliases||[]).length?' / '+esc(s.aliases[0]):''}</option>`).join('');}
+function populateRouteSelect(){const id=$('#logStation').value;const routes=data.routes.filter(r=>!id||r.destinationId===id);$('#logRoute').innerHTML='<option value="">Unspecified / direct</option>'+routes.map(r=>`<option value="${esc(r.id)}">${esc(routeString(r))}</option>`).join('');}
+function populateEquipmentSelect(){const opts='<option value="">Unspecified</option>'+data.equipment.map(e=>`<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');$('#logEquipment').innerHTML=opts;}
+function openLogForm(status='worked',stationId=''){pendingImage='';$('#logDate').value=localNow();populateStationSelect('#logStation');if(stationId)$('#logStation').value=stationId;$('#logStatus').value=status;populateRouteSelect();populateEquipmentSelect();const s=stationById($('#logStation').value);$('#logFrequency').value=s?.frequency||'';$('#logEquipment').value=data.equipment[0]?.id||'';$('#logPower').value=equipmentById($('#logEquipment').value)?.power||'';$('#logLocation').value='';$('#logNote').value='';$('#logImage').value='';$('#imagePreviewWrap').classList.add('hidden');$('#logDialog').showModal();}
+function logCardHtml(l){const eq=equipmentById(l.equipmentId);return`<div class="log-card"><div class="log-top"><div><strong>${esc(l.station||stationById(l.stationId)?.call||'General')}</strong><div class="small muted">${esc(formatDate(l.date))}${l.location?` · ${esc(l.location)}`:''}</div></div><span class="badge"><span class="status-dot status-${esc(l.status)}" style="margin-right:5px"></span>${esc(statusLabel(l.status))}</span></div>${l.route?`<div class="route-text">${esc(l.route)}</div>`:''}<div class="meta-row">${eq?`<span class="badge">${esc(eq.name)}</span>`:''}${l.frequency?`<span class="badge">${esc(l.frequency)}</span>`:''}${l.power?`<span class="badge">${esc(l.power)}</span>`:''}</div><p style="margin-top:9px">${esc(l.note)}</p>${l.image?`<img class="attachment-thumb" src="${l.image}" alt="Log attachment" />`:''}</div>`;}
+function renderLogs(){const logs=[...data.logs].sort((a,b)=>b.date.localeCompare(a.date));$('#logList').innerHTML=logs.length?logs.map(logCardHtml).join(''):'<div class="empty">No connection history yet.</div>';}
+function saveLog(){const s=stationById($('#logStation').value),r=data.routes.find(x=>x.id===$('#logRoute').value),eq=equipmentById($('#logEquipment').value);const log={id:makeId('log'),date:$('#logDate').value,stationId:s?.id||'',station:s?.call||'',status:$('#logStatus').value,routeId:r?.id||'',route:r?routeString(r):'',equipmentId:eq?.id||'',power:$('#logPower').value.trim(),frequency:$('#logFrequency').value.trim(),location:$('#logLocation').value.trim(),note:$('#logNote').value.trim(),image:pendingImage};data.logs.push(log);if(s){s.status=log.status;s.lastTested=log.date.slice(0,10);s.lastHeard=log.date;if(log.status==='worked')s.confidence='confirmed';}if(r){r.status=log.status;r.lastTested=log.date.slice(0,10);if(log.status==='worked')r.source='confirmed';}saveData();renderAll();}
+async function compressImage(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=reject;reader.onload=()=>{const img=new Image();img.onload=()=>{const max=900,scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);let q=.72;let url=c.toDataURL('image/jpeg',q);while(url.length>430000&&q>.35){q-=.08;url=c.toDataURL('image/jpeg',q);}resolve(url);};img.onerror=reject;img.src=reader.result;};reader.readAsDataURL(file);});}
+
+function openRouteForm(id=null){populateStationSelect('#routeDestination');const r=id?data.routes.find(x=>x.id===id):null;$('#routeDialogTitle').textContent=r?'Edit route':'Add route';$('#routeId').value=r?.id||'';$('#routeDestination').value=r?.destinationId||data.stations[0]?.id||'';$('#routeStatus').value=r?.status||'unknown';$('#routeLastTested').value=r?.lastTested||today();$('#routeSource').value=r?.source||'unknown';$('#routePath').value=r?routeString(r):'HOME → ';$('#routeCommands').value=r?.commands||'';$('#routeNotes').value=r?.notes||'';$('#deleteRouteBtn').classList.toggle('hidden',!r);$('#routeDialog').showModal();}
+function saveRoute(){const id=$('#routeId').value,destinationId=$('#routeDestination').value,path=parsePath($('#routePath').value);const dest=stationById(destinationId);if(!dest||path.length<2){alert('Choose a destination and enter at least two path points.');return false;}if(path[path.length-1]!==dest.call && !(dest.aliases||[]).includes(path[path.length-1])){if(!confirm(`The path ends at ${path[path.length-1]}, but the selected destination is ${dest.call}. Save anyway?`))return false;}const r={id:id||makeId('route'),destinationId,status:$('#routeStatus').value,lastTested:$('#routeLastTested').value,source:$('#routeSource').value,path,commands:$('#routeCommands').value.trim(),notes:$('#routeNotes').value.trim()};if(id)data.routes[data.routes.findIndex(x=>x.id===id)]=r;else data.routes.push(r);saveData();renderAll();return true;}
+function deleteRoute(){const id=$('#routeId').value;if(!id)return;if(!confirm('Delete this route record?'))return;data.routes=data.routes.filter(r=>r.id!==id);saveData();$('#routeDialog').close();renderAll();}
+function routeCard(r){const s=stationById(r.destinationId);return`<div class="route-card"><div class="route-top"><div><strong>${esc(s?.call||'Unknown destination')}</strong><div class="route-text">${esc(routeString(r))}</div></div><div style="display:flex;gap:6px"><button class="secondary-btn compact-btn share-route" data-id="${esc(r.id)}">Share</button><button class="secondary-btn compact-btn edit-route" data-id="${esc(r.id)}">Edit</button></div></div><div class="meta-row"><span class="badge">${esc(statusLabel(r.status))}</span><span class="badge">${esc(confidenceLabel(r.source))}</span><span class="small muted">${esc(formatDate(r.lastTested))}</span></div>${r.commands?`<pre class="command-box" style="margin-bottom:0">${esc(r.commands)}</pre>`:''}</div>`;}
+function renderRoutes(){populateStationSelect('#routeStartSelect',true);populateStationSelect('#routeDestinationSelect');if(!$('#routeStartSelect').value)$('#routeStartSelect').value=HOME_ID;$('#routeList').innerHTML=data.routes.length?data.routes.slice().sort((a,b)=>(b.lastTested||'').localeCompare(a.lastTested||'')).map(routeCard).join(''):'<div class="empty">No saved routes.</div>';$$('.edit-route').forEach(b=>b.onclick=()=>openRouteForm(b.dataset.id));$$('.share-route').forEach(b=>b.onclick=()=>{const r=data.routes.find(x=>x.id===b.dataset.id);shareText('Houston Packet route',routeShareText(r));});}
+function graphEdges(confirmedOnly){const edges=[];for(const r of data.routes){if(confirmedOnly&&r.status!=='worked')continue;for(let i=0;i<r.path.length-1;i++){const a=resolveNodeId(r.path[i]),b=resolveNodeId(r.path[i+1]);if(a&&b)edges.push({a,b,route:r});}}return edges;}
+function resolveNodeId(name){if(upper(name)==='HOME')return HOME_ID;return stationByName(name)?.id||null;}
+function nodeLabel(id){return id===HOME_ID?'HOME':stationById(id)?.call||id;}
+function findPath(){const start=$('#routeStartSelect').value,dest=$('#routeDestinationSelect').value,confirmed=$('#confirmedOnlyCheck').checked;if(start===dest){$('#pathResult').innerHTML='<p>You are already at the selected destination.</p>';return;}const edges=graphEdges(confirmed),adj=new Map();for(const e of edges){if(!adj.has(e.a))adj.set(e.a,[]);adj.get(e.a).push({id:e.b,route:e.route});}const q=[start],seen=new Set([start]),prev=new Map();while(q.length){const cur=q.shift();if(cur===dest)break;for(const n of adj.get(cur)||[]){if(!seen.has(n.id)){seen.add(n.id);prev.set(n.id,{from:cur,route:n.route});q.push(n.id);}}}if(!seen.has(dest)){const direct=data.routes.filter(r=>r.destinationId===dest && (!confirmed||r.status==='worked')).sort((a,b)=>rScore(b)-rScore(a))[0];if(direct){renderPathResult(direct.path,direct);}else $('#pathResult').innerHTML=`<div class="empty">No ${confirmed?'confirmed ':''}path found in your local records.</div>`;return;}const ids=[];let cur=dest,lastRoute=null;while(cur){ids.push(cur);const p=prev.get(cur);if(!p)break;lastRoute=p.route;cur=p.from;}ids.reverse();renderPathResult(ids.map(nodeLabel),lastRoute);}
+function rScore(r){return (r.status==='worked'?100:0)+(r.source==='confirmed'?20:0)+(r.lastTested||'').replaceAll('-','')/100000000;}
+function renderPathResult(path,route){const commands=commandsForPath(path);$('#pathResult').innerHTML=`<p class="eyebrow">BEST KNOWN PATH</p><div class="path-steps">${path.map((p,i)=>`${i?'<span class="path-arrow">→</span>':''}<span class="path-step">${esc(typeof p==='string'?p:nodeLabel(p))}</span>`).join('')}</div>${route?`<p class="small muted">Supporting route record: ${esc(statusLabel(route.status))} · ${esc(formatDate(route.lastTested))}</p>`:''}${commands?`<h3>Suggested connect sequence</h3><pre class="command-box">${esc(commands)}</pre>`:''}<p class="small muted">This is a topology lookup from your notes, not a guarantee the RF path is currently available.</p>`;}
+function commandsForPath(path){const names=path.map(p=>typeof p==='string'?upper(p):nodeLabel(p));return names.filter(n=>n!=='HOME').map(n=>`C ${n}`).join('\n');}
+
+function graphLinks(){const m=new Map();for(const r of data.routes){for(let i=0;i<r.path.length-1;i++){const a=resolveNodeId(r.path[i]),b=resolveNodeId(r.path[i+1]);if(!a||!b)continue;const key=`${a}|${b}`,old=m.get(key);if(!old||rScore(r)>rScore(old.route))m.set(key,{a,b,status:r.status,route:r});}}return [...m.values()];}
+function renderMap(){const svg=$('#networkSvg'),nodes=[{id:HOME_ID,call:'HOME',type:'Local',status:'worked',favorite:true},...data.stations],positions={};const center={x:500,y:360};const degree=new Map(nodes.map(n=>[n.id,0]));graphLinks().forEach(e=>{degree.set(e.a,(degree.get(e.a)||0)+1);degree.set(e.b,(degree.get(e.b)||0)+1);});const ordered=nodes.slice().sort((a,b)=>(degree.get(b.id)||0)-(degree.get(a.id)||0));ordered.forEach((n,i)=>{if(i===0){positions[n.id]=[center.x,center.y];return;}const ring=i<=8?230:320,slot=i<=8?i-1:i-9,count=i<=8?Math.min(8,ordered.length-1):Math.max(1,ordered.length-9),angle=-Math.PI/2+(slot/count)*Math.PI*2;positions[n.id]=[center.x+ring*Math.cos(angle),center.y+ring*Math.sin(angle)];});const lines=graphLinks().map(e=>{const a=positions[e.a],b=positions[e.b];return`<line class="edge ${esc(e.status)}" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" />`;}).join('');const nodeHtml=nodes.map(n=>{const [x,y]=positions[n.id],shape=n.type==='BBS'?`<rect class="node-shape" x="-38" y="-38" width="76" height="76" rx="10"/>`:n.type==='Chat'?`<polygon class="node-shape" points="0,-45 45,0 0,45 -45,0"/>`:`<circle class="node-shape" r="42"/>`;return`<g class="node ${esc(n.status||'unknown')}" data-id="${esc(n.id)}" transform="translate(${x},${y})">${shape}<text y="-2">${esc(n.call.slice(0,11))}</text><text class="sub" y="16">${esc(n.type)}</text>${n.favorite?'<text class="star" x="31" y="-28">★</text>':''}</g>`;}).join('');svg.innerHTML=`<defs><radialGradient id="mapBg"><stop offset="0%" stop-color="#123149"/><stop offset="100%" stop-color="#06131f"/></radialGradient></defs><rect width="1000" height="720" fill="url(#mapBg)"/>${lines}${nodeHtml}`;svg.querySelectorAll('.node').forEach(n=>n.onclick=()=>{if(n.dataset.id!==HOME_ID)openDetail(n.dataset.id);});}
+
+function renderReference(){const profiles=Object.keys(commandProfiles);$('#commandProfileBar').innerHTML=profiles.map(p=>`<button class="chip ${p===activeCommandProfile?'active':''}" data-profile="${esc(p)}">${esc(p)}</button>`).join('');$$('#commandProfileBar .chip').forEach(b=>b.onclick=()=>{activeCommandProfile=b.dataset.profile;renderReference();});$('#referenceList').innerHTML=commandProfiles[activeCommandProfile].map(([c,d])=>`<div class="reference-card"><code>${esc(c)}</code><p>${esc(d)}</p></div>`).join('');}
+
+function renderEquipment(){const list=$('#equipmentList');list.innerHTML=data.equipment.length?data.equipment.map(e=>`<div class="equipment-card"><div class="route-top"><div><strong>${esc(e.name)}</strong><div class="small muted">${esc([e.power,e.antenna,e.interface].filter(Boolean).join(' · ')||'No setup details yet')}</div></div><button class="secondary-btn compact-btn edit-equipment" data-id="${esc(e.id)}">Edit</button></div>${e.notes?`<p class="small muted" style="margin:8px 0 0">${esc(e.notes)}</p>`:''}</div>`).join(''):'<div class="empty">No equipment profiles.</div>';$$('.edit-equipment').forEach(b=>b.onclick=()=>editEquipment(b.dataset.id));populateEquipmentSelect();}
+function editEquipment(id){const e=equipmentById(id);$('#equipmentId').value=e?.id||'';$('#equipmentName').value=e?.name||'';$('#equipmentPower').value=e?.power||'';$('#equipmentAntenna').value=e?.antenna||'';$('#equipmentInterface').value=e?.interface||'';$('#equipmentNotes').value=e?.notes||'';}
+function clearEquipmentForm(){$('#equipmentId').value='';$('#equipmentName').value='';$('#equipmentPower').value='';$('#equipmentAntenna').value='';$('#equipmentInterface').value='';$('#equipmentNotes').value='';}
+function saveEquipment(){const id=$('#equipmentId').value,e={id:id||makeId('gear'),name:$('#equipmentName').value.trim(),power:$('#equipmentPower').value.trim(),antenna:$('#equipmentAntenna').value.trim(),interface:$('#equipmentInterface').value.trim(),notes:$('#equipmentNotes').value.trim()};if(id)data.equipment[data.equipment.findIndex(x=>x.id===id)]=e;else data.equipment.push(e);saveData();renderEquipment();clearEquipmentForm();}
+
+function parseDiscovery(){const txt=$('#discoverText').value.toUpperCase();const raw=txt.match(/\b[A-Z0-9]{2,10}(?:-[0-9]{1,2})?\b/g)||[];const stop=new Set(['CONNECTED','CONNECT','DISCONNECT','COMMAND','NODE','NODES','MHEARD','USERS','PORTS','PACKET','WELCOME','HELP','TYPE','ENTER','RETURN','CURRENT','AVAILABLE','FROM','ROUTE','VIA','THE','AND','FOR','WITH','YOUR','CALL','BBS','CHAT']);const candidates=[...new Set(raw.filter(x=>/[A-Z]/.test(x)&&!stop.has(x)&&!/^[0-9]+$/.test(x)))].slice(0,40);$('#discoverResults').innerHTML=candidates.length?candidates.map(c=>{const found=stationByName(c);return`<div class="discover-candidate"><div><strong>${esc(c)}</strong><div class="small muted">${found?`Already matches ${esc(found.call)}`:'New candidate — review before saving'}</div></div>${found?`<button class="secondary-btn compact-btn open-discovered" data-id="${esc(found.id)}">Open</button>`:`<button class="primary-btn compact-btn add-discovered" data-name="${esc(c)}">Add observed</button>`}</div>`;}).join(''):'<div class="empty">No station-like tokens found.</div>';$$('.open-discovered').forEach(b=>b.onclick=()=>{$('#discoverDialog').close();openDetail(b.dataset.id);});$$('.add-discovered').forEach(b=>b.onclick=()=>{const name=b.dataset.name;data.stations.push({id:makeId(name),call:name,aliases:[],type:'Node',status:'observed',confidence:'unknown',software:'General',frequency:'',baud:'1200',lastTested:today(),lastHeard:'',grid:'',lat:null,lon:null,location:'',sysop:'',services:['NODE'],commands:'',notes:'Added from Discovery Mode terminal parsing. Verify identity and capabilities.',favorite:false,watch:true,bbs:{name:'',areas:'',lastLogin:'',waiting:'unknown',partners:'',latest:'',notes:''},chat:{lastActivity:'',regulars:'',instructions:'',notes:''}});saveData();renderAll();parseDiscovery();});}
+
+function renderSettings(){document.body.classList.toggle('red-mode',!!data.settings.redMode);$('#redModeCheck').checked=!!data.settings.redMode;$('#staleDaysSelect').value=String(data.settings.staleDays||14);$('#aboutVersion').textContent=APP_VERSION;}
+function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});downloadBlob(blob,`houston-packet-backup-${today()}.json`);}
+function csvCell(v){const s=Array.isArray(v)?v.join('|'):v==null?'':String(v);return `"${s.replaceAll('"','""')}"`;}
+function toCsv(rows,fields){return [fields.join(','),...rows.map(r=>fields.map(f=>csvCell(f.includes('.')?f.split('.').reduce((o,k)=>o?.[k],r):r[f])).join(','))].join('\n');}
+function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function exportCsv(){const tables=[['stations',['id','call','aliases','type','status','confidence','software','frequency','baud','lastTested','lastHeard','grid','lat','lon','location','sysop','services','commands','notes','favorite','watch']],['routes',['id','destinationId','path','status','lastTested','source','commands','notes']],['logs',['id','date','stationId','station','status','routeId','route','equipmentId','power','frequency','location','note']],['equipment',['id','name','power','antenna','interface','notes']]];tables.forEach(([name,fields],i)=>setTimeout(()=>downloadBlob(new Blob([toCsv(data[name],fields)],{type:'text/csv'}),`houston-packet-${name}-${today()}.csv`),i*180));}
+async function importData(file){try{const parsed=normalizeData(JSON.parse(await file.text()));if(!Array.isArray(parsed.stations)||!Array.isArray(parsed.logs))throw new Error('Invalid');data=parsed;saveData();renderAll();$('#toolsDialog').close();}catch(e){alert('That file does not look like a Houston Packet Field JSON backup.');}}
+
+function locateUser(){if(!navigator.geolocation){alert('Location is not available in this browser.');return;}$('#locationStatus').textContent='Requesting location…';navigator.geolocation.getCurrentPosition(pos=>{userLocation={lat:pos.coords.latitude,lon:pos.coords.longitude};$('#locationStatus').textContent='Location active for this session only. Add coordinates to station records to see distances.';$('#sortSelect').value='distance';renderStations();},err=>{$('#locationStatus').textContent='Location was not granted. Distance mode remains optional.';console.warn(err);},{enableHighAccuracy:false,timeout:10000,maximumAge:300000});}
+
+
+async function shareText(title,text){
+  try{if(navigator.share){await navigator.share({title,text});return;}if(navigator.clipboard){await navigator.clipboard.writeText(text);alert('Copied to clipboard.');return;}}catch(e){if(e?.name==='AbortError')return;}
+  prompt('Copy this text:',text);
+}
+function stationShareText(s){const routes=routeForStation(s.id);const best=routes.find(r=>r.status==='worked')||routes[0];return [s.call,(s.aliases||[]).length?`Aliases: ${s.aliases.join(', ')}`:'',`${s.type} · ${statusLabel(s.status)}`,s.frequency?`Frequency: ${s.frequency}${s.baud?` · ${s.baud} baud`:''}`:'',best?`Path: ${routeString(best)}`:'',best?.commands?`Commands:\n${best.commands}`:s.commands?`Commands:\n${s.commands}`:'',`Last tested: ${formatDate(s.lastTested)}`,s.notes?`Notes: ${s.notes}`:'','Houston Packet Field · Thomas Hopkins'].filter(Boolean).join('\n');}
+function routeShareText(r){if(!r)return '';const s=stationById(r.destinationId);return [`Destination: ${s?.call||'Unknown'}`,`Path: ${routeString(r)}`,`Status: ${statusLabel(r.status)}`,`Last tested: ${formatDate(r.lastTested)}`,r.commands?`Commands:\n${r.commands}`:'',r.notes?`Notes: ${r.notes}`:'','Houston Packet Field · Thomas Hopkins'].filter(Boolean).join('\n');}
+function parseCsv(text){
+  const rows=[];let row=[],field='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];if(q){if(c==='"'&&text[i+1]==='"'){field+='"';i++;}else if(c==='"')q=false;else field+=c;}else{if(c==='"')q=true;else if(c===','){row.push(field);field='';}else if(c==='\n'){row.push(field.replace(/\r$/,''));rows.push(row);row=[];field='';}else field+=c;}}
+  if(field||row.length){row.push(field.replace(/\r$/,''));rows.push(row);}if(!rows.length)return [];
+  const headers=rows.shift().map(h=>h.trim());return rows.filter(r=>r.some(x=>x!=='')).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??''])));
+}
+function boolCsv(v){return String(v).toLowerCase()==='true'||v==='1';}
+async function importCsv(file){
+  try{const rows=parseCsv(await file.text());if(!rows.length)throw new Error('Empty CSV');const h=Object.keys(rows[0]);let key,converted;
+    if(h.includes('call')&&h.includes('type')){key='stations';converted=rows.map(r=>normalizeData({stations:[{...r,aliases:(r.aliases||'').split('|').filter(Boolean),services:(r.services||'').split('|').filter(Boolean),lat:r.lat===''?null:Number(r.lat),lon:r.lon===''?null:Number(r.lon),favorite:boolCsv(r.favorite),watch:boolCsv(r.watch),bbs:{},chat:{}}],routes:[],logs:[],equipment:[],settings:{}}).stations[0]);}
+    else if(h.includes('destinationId')&&h.includes('path')){key='routes';converted=rows.map(r=>({...r,path:(r.path||'').split('|').filter(Boolean)}));}
+    else if(h.includes('date')&&h.includes('stationId')&&h.includes('note')){key='logs';converted=rows.map(r=>({...r,image:''}));}
+    else if(h.includes('name')&&h.includes('antenna')&&h.includes('interface')){key='equipment';converted=rows;}
+    else throw new Error('Unknown table');
+    if(!confirm(`Import ${converted.length} ${key} row(s)? Existing records with matching IDs will be replaced; others will be added.`))return;
+    const byId=new Map(data[key].map(x=>[x.id,x]));converted.forEach(x=>byId.set(x.id||makeId(key),x));data[key]=[...byId.values()];saveData();renderAll();$('#toolsDialog').close();
+  }catch(e){console.warn(e);alert('Could not import that CSV. Use one of the CSV tables exported by Houston Packet Field V2.');}
 }
 
-function filteredStations() {
-  const q = $('#searchInput').value.trim().toLowerCase();
-  return data.stations.filter(s => {
-    const hay = [s.call,s.alias,s.type,s.status,s.frequency,s.route,s.commands,s.notes].join(' ').toLowerCase();
-    const qOk = !q || hay.includes(q);
-    let fOk = true;
-    if (activeFilter === 'Worked') fOk = s.status === 'worked';
-    else if (activeFilter === 'No response') fOk = s.status === 'failed';
-    else if (activeFilter !== 'All') fOk = s.type === activeFilter;
-    return qOk && fOk;
-  });
-}
+function renderAll(){renderSettings();renderFilters();renderStations();renderField();renderRoutes();renderLogs();renderReference();renderMap();renderEquipment();}
+function activateView(view){$$('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));$$('.view').forEach(v=>v.classList.toggle('active',v.id===view));if(view==='mapView')renderMap();if(view==='routeView')renderRoutes();}
 
-function renderStations() {
-  const stations = filteredStations();
-  $('#stationCount').textContent = `${stations.length} station${stations.length===1?'':'s'}`;
-  $('#stationList').innerHTML = stations.length ? stations.map(s => `
-    <button class="station-card" data-id="${esc(s.id)}" style="text-align:left; color:inherit; width:100%;">
-      <div>
-        <div class="station-name"><span class="status-dot status-${esc(s.status)}"></span><strong>${esc(s.call)}</strong>${s.alias?`<span class="alias">${esc(s.alias)}</span>`:''}</div>
-        <div class="meta-row"><span class="badge">${esc(s.type)}</span>${s.frequency?`<span class="badge">${esc(s.frequency)}</span>`:''}<span class="muted small">${esc(statusLabel(s.status))}</span></div>
-        ${s.route?`<div class="route">${esc(s.route)}</div>`:''}
-      </div><span class="chev">›</span>
-    </button>`).join('') : `<div class="empty">No matching stations.</div>`;
-  $$('#stationList .station-card').forEach(b => b.onclick = () => openDetail(b.dataset.id));
-}
-
-function openDetail(id) {
-  const s = data.stations.find(x=>x.id===id); if (!s) return;
-  $('#detailContent').innerHTML = `
-    <div class="sheet-head"><div><p class="eyebrow">${esc(s.type.toUpperCase())}</p><h2>${esc(s.call)} ${s.alias?`<span class="alias">${esc(s.alias)}</span>`:''}</h2></div><button class="icon-btn" id="closeDetail">×</button></div>
-    <div class="meta-row"><span class="status-dot status-${esc(s.status)}"></span><strong>${esc(statusLabel(s.status))}</strong>${s.frequency?`<span class="badge">${esc(s.frequency)}</span>`:''}</div>
-    <dl class="detail-kv"><dt>Last tested</dt><dd>${esc(formatDate(s.lastTested))}</dd><dt>Route</dt><dd>${esc(s.route || '—')}</dd></dl>
-    ${s.commands?`<h3>Commands</h3><pre class="command-box">${esc(s.commands)}</pre>`:''}
-    <h3>Notes</h3><p class="muted" style="white-space:pre-wrap;line-height:1.5">${esc(s.notes || 'No notes yet.')}</p>
-    <div class="sheet-actions"><button id="editFromDetail" class="secondary-btn">Edit</button>${s.route?'<button id="copyRouteBtn" class="secondary-btn">Copy route</button>':''}<span class="spacer"></span><button id="detailDone" class="primary-btn">Done</button></div>`;
-  const d = $('#detailDialog'); d.showModal();
-  $('#closeDetail').onclick = $('#detailDone').onclick = () => d.close();
-  $('#editFromDetail').onclick = () => { d.close(); openStationForm(id); };
-  if ($('#copyRouteBtn')) $('#copyRouteBtn').onclick = async () => { await navigator.clipboard?.writeText(s.route); $('#copyRouteBtn').textContent='Copied'; };
-}
-
-function openStationForm(id=null) {
-  const s = id ? data.stations.find(x=>x.id===id) : null;
-  $('#stationDialogTitle').textContent = s ? 'Edit station' : 'Add station';
-  $('#stationId').value = s?.id || '';
-  $('#stationCall').value = s?.call || '';
-  $('#stationAlias').value = s?.alias || '';
-  $('#stationType').value = s?.type || 'Node';
-  $('#stationStatus').value = s?.status || 'unknown';
-  $('#stationFrequency').value = s?.frequency || '';
-  $('#stationLastTested').value = s?.lastTested || '';
-  $('#stationRoute').value = s?.route || '';
-  $('#stationCommands').value = s?.commands || '';
-  $('#stationNotes').value = s?.notes || '';
-  $('#deleteStationBtn').classList.toggle('hidden', !s);
-  $('#stationDialog').showModal();
-}
-
-function saveStationFromForm() {
-  const existingId = $('#stationId').value;
-  const station = {
-    id: existingId || makeId($('#stationCall').value), call: $('#stationCall').value.trim().toUpperCase(), alias: $('#stationAlias').value.trim().toUpperCase(),
-    type: $('#stationType').value, status: $('#stationStatus').value, frequency: $('#stationFrequency').value.trim(), lastTested: $('#stationLastTested').value,
-    route: $('#stationRoute').value.trim(), commands: $('#stationCommands').value.trim(), notes: $('#stationNotes').value.trim()
-  };
-  if (existingId) data.stations[data.stations.findIndex(s=>s.id===existingId)] = station; else data.stations.push(station);
-  saveData(); renderAll();
-}
-
-function deleteStation() {
-  const id = $('#stationId').value; if (!id) return;
-  const s = data.stations.find(x=>x.id===id);
-  if (!confirm(`Delete ${s.call}?`)) return;
-  data.stations = data.stations.filter(x=>x.id!==id);
-  data.edges = data.edges.filter(e=>e.from!==id && e.to!==id);
-  saveData(); $('#stationDialog').close(); renderAll();
-}
-
-function renderLogs() {
-  const logs = [...data.logs].sort((a,b)=>b.date.localeCompare(a.date));
-  $('#logList').innerHTML = logs.length ? logs.map(l=>`<div class="log-card"><div class="log-top"><div><strong>${esc(l.station || 'General')}</strong><div class="small muted">${esc(formatDate(l.date))}</div></div><span class="badge"><span class="status-dot status-${esc(l.status)}" style="margin-right:6px"></span>${esc(statusLabel(l.status))}</span></div>${l.route?`<div class="route">${esc(l.route)}</div>`:''}<p style="margin-top:10px">${esc(l.note)}</p></div>`).join('') : '<div class="empty">No field notes yet.</div>';
-}
-
-function openLogForm() {
-  const now = new Date(); const local = new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  $('#logDate').value = local; $('#logStation').value=''; $('#logStatus').value='worked'; $('#logRoute').value=''; $('#logNote').value=''; $('#logDialog').showModal();
-}
-function saveLog() {
-  data.logs.push({ id: makeId('log'), date:$('#logDate').value, station:$('#logStation').value.trim().toUpperCase(), status:$('#logStatus').value, route:$('#logRoute').value.trim(), note:$('#logNote').value.trim() });
-  saveData(); renderLogs();
-}
-
-function renderReference() { $('#referenceList').innerHTML = commandReference.map(([c,d])=>`<div class="reference-card"><code>${esc(c)}</code><p>${esc(d)}</p></div>`).join(''); }
-
-function renderMap() {
-  const svg = $('#networkSvg');
-  const positions = {
-    bigboy:[450,310], wr5gc:[450,100], foxhop:[170,170], tarnod:[170,455], lcchat:[730,170], lcity:[730,455], tarbox:[450,535], gc:[795,310]
-  };
-  const extras = data.stations.filter(s=>!positions[s.id]);
-  extras.forEach((s,i)=>{ const angle=(i/Math.max(1,extras.length))*Math.PI*2; positions[s.id]=[450+300*Math.cos(angle),310+230*Math.sin(angle)]; });
-  const edgeHtml = data.edges.map(e=>{
-    const a=positions[e.from], b=positions[e.to]; if(!a||!b)return '';
-    return `<line class="edge ${esc(e.status||'')}" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" />`;
-  }).join('');
-  const nodeHtml = data.stations.map(s=>{
-    const p=positions[s.id]; if(!p)return '';
-    const label=s.call.length>10?s.call.slice(0,10):s.call;
-    return `<g class="node ${esc(s.status)}" data-id="${esc(s.id)}" transform="translate(${p[0]},${p[1]})"><circle r="44"/><text y="-2">${esc(label)}</text><text class="sub" y="17">${esc(s.type)}</text></g>`;
-  }).join('');
-  svg.innerHTML = `<defs><radialGradient id="bg"><stop offset="0%" stop-color="#10233a"/><stop offset="100%" stop-color="#081320"/></radialGradient></defs><rect width="900" height="620" fill="url(#bg)"/>${edgeHtml}${nodeHtml}`;
-  svg.querySelectorAll('.node').forEach(n=>n.onclick=()=>openDetail(n.dataset.id));
-}
-
-function renderAll(){ renderFilters(); renderStations(); renderLogs(); renderReference(); renderMap(); }
-
-function exportData() {
-  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=`houston-packet-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
-}
-async function importData(file) {
-  try { const parsed=JSON.parse(await file.text()); if(!Array.isArray(parsed.stations)||!Array.isArray(parsed.logs)) throw new Error('Invalid backup'); data=parsed; data.edges ||= []; saveData(); renderAll(); $('#toolsDialog').close(); }
-  catch { alert('That file does not look like a Houston Packet Field backup.'); }
-}
-
-$$('.tab').forEach(t=>t.onclick=()=>{ $$('.tab').forEach(x=>x.classList.remove('active')); $$('.view').forEach(x=>x.classList.remove('active')); t.classList.add('active'); $('#'+t.dataset.view).classList.add('active'); if(t.dataset.view==='mapView') renderMap(); });
-$('#searchInput').oninput=renderStations;
-$('#addStationBtn').onclick=()=>openStationForm();
-$('#addLogBtn').onclick=openLogForm;
-$('#moreBtn').onclick=()=>$('#toolsDialog').showModal();
-$('#fitMapBtn').onclick=renderMap;
+$$('.tab').forEach(t=>t.onclick=()=>activateView(t.dataset.view));
 $$('.close-dialog').forEach(b=>b.onclick=()=>b.closest('dialog').close());
-$('#stationForm').onsubmit=(e)=>{ e.preventDefault(); saveStationFromForm(); $('#stationDialog').close(); };
-$('#deleteStationBtn').onclick=deleteStation;
-$('#logForm').onsubmit=(e)=>{ e.preventDefault(); saveLog(); $('#logDialog').close(); };
-$('#exportBtn').onclick=exportData;
-$('#importInput').onchange=e=>e.target.files[0]&&importData(e.target.files[0]);
-$('#resetBtn').onclick=()=>{ if(confirm('Reset all local data to the starter Houston observations?')) { data=structuredClone(starterData); saveData(); renderAll(); $('#toolsDialog').close(); } };
+$('#brandBtn').onclick=()=>$('#aboutDialog').showModal();
+$('#moreBtn').onclick=()=>{$('#toolsDialog').showModal();renderSettings();};
+$('#searchInput').oninput=renderStations;$('#sortSelect').onchange=renderStations;$('#locateBtn').onclick=locateUser;
+$('#addStationBtn').onclick=()=>openStationForm();$('#stationType').onchange=toggleServiceFields;
+$('#stationForm').onsubmit=e=>{e.preventDefault();if(saveStationFromForm())$('#stationDialog').close();};$('#deleteStationBtn').onclick=deleteStation;
+$('#addLogBtn').onclick=()=>openLogForm();$('#fieldWorkedBtn').onclick=()=>openLogForm('worked');$('#fieldFailedBtn').onclick=()=>openLogForm('failed');
+$('#logStation').onchange=()=>{populateRouteSelect();const s=stationById($('#logStation').value);if(s?.frequency)$('#logFrequency').value=s.frequency;};$('#logEquipment').onchange=()=>{$('#logPower').value=equipmentById($('#logEquipment').value)?.power||'';};
+$('#logForm').onsubmit=e=>{e.preventDefault();saveLog();$('#logDialog').close();};$('#logImage').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;pendingImage=await compressImage(f);$('#imagePreview').src=pendingImage;$('#imagePreviewWrap').classList.remove('hidden');};$('#clearImageBtn').onclick=()=>{pendingImage='';$('#logImage').value='';$('#imagePreviewWrap').classList.add('hidden');};
+$('#addRouteBtn').onclick=()=>openRouteForm();$('#routeForm').onsubmit=e=>{e.preventDefault();if(saveRoute())$('#routeDialog').close();};$('#deleteRouteBtn').onclick=deleteRoute;$('#findPathBtn').onclick=findPath;$('#fieldRouteBtn').onclick=()=>{activateView('routeView');setTimeout(()=>$('#routeDestinationSelect').focus(),50);};
+$('#fitMapBtn').onclick=renderMap;$('#fieldDiscoverBtn').onclick=()=>{$('#discoverDialog').showModal();};$('#parseDiscoverBtn').onclick=parseDiscovery;
+$('#equipmentBtn').onclick=()=>{$('#equipmentDialog').showModal();renderEquipment();};$('#equipmentForm').onsubmit=e=>{e.preventDefault();saveEquipment();};$('#equipmentClearBtn').onclick=clearEquipmentForm;
+$('#exportBtn').onclick=exportData;$('#exportCsvBtn').onclick=exportCsv;$('#importInput').onchange=e=>e.target.files[0]&&importData(e.target.files[0]);$('#csvImportInput').onchange=e=>e.target.files[0]&&importCsv(e.target.files[0]);
+$('#redModeCheck').onchange=e=>{data.settings.redMode=e.target.checked;saveData();renderSettings();};$('#staleDaysSelect').onchange=e=>{data.settings.staleDays=Number(e.target.value);saveData();renderAll();};
+$('#resetBtn').onclick=()=>{if(confirm('Reset all local data to the V2 starter observations? This cannot be undone unless you exported a backup.')){data=clone(starterData);saveData();renderAll();$('#toolsDialog').close();}};
+window.addEventListener('online',()=>$('#offlineBanner').classList.add('hidden'));window.addEventListener('offline',()=>$('#offlineBanner').classList.remove('hidden'));if(!navigator.onLine)$('#offlineBanner').classList.remove('hidden');
 
 renderAll();
-if ('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));
+if('serviceWorker'in navigator){window.addEventListener('load',async()=>{try{const reg=await navigator.serviceWorker.register('./service-worker.js');if(reg.waiting)showUpdate(reg);reg.addEventListener('updatefound',()=>{const w=reg.installing;w?.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)showUpdate(reg);});});navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload());}catch(e){console.warn('Service worker',e);}});}
+function showUpdate(reg){$('#updateBanner').classList.remove('hidden');$('#reloadUpdateBtn').onclick=()=>reg.waiting?.postMessage({type:'SKIP_WAITING'});}

@@ -3,78 +3,113 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1220" />
+  <meta name="theme-color" content="#07131f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Packet Field" />
-  <title>Houston Packet Field</title>
+  <meta name="apple-mobile-web-app-title" content="Houston Packet" />
+  <meta name="description" content="Offline packet-radio field directory and route notebook developed by Thomas Hopkins." />
+  <meta name="author" content="Thomas Hopkins" />
+  <title>Houston Packet Field — Thomas Hopkins</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="offlineBanner" class="offline-banner hidden">Offline — local field data remains available.</div>
+  <div id="updateBanner" class="update-banner hidden"><span>New app version ready.</span><button id="reloadUpdateBtn">Update</button></div>
+
   <div class="app-shell">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">OFFLINE FIELD DIRECTORY</p>
-        <h1>Houston Packet</h1>
-      </div>
-      <button id="moreBtn" class="icon-btn" aria-label="Data tools">•••</button>
+      <button id="brandBtn" class="brand" aria-label="About Houston Packet Field">
+        <span class="brand-mark" aria-hidden="true"><span>HP</span><small>TH</small></span>
+        <span class="brand-copy"><span class="eyebrow">THOMAS HOPKINS · FIELD TOOLS</span><strong>Houston Packet</strong></span>
+      </button>
+      <button id="moreBtn" class="icon-btn" aria-label="Data and app tools">•••</button>
     </header>
 
     <main>
-      <section id="directoryView" class="view active" aria-labelledby="directoryTab">
+      <section id="fieldView" class="view active" aria-labelledby="fieldTab">
+        <div class="hero-panel">
+          <p class="eyebrow">FIELD MODE</p>
+          <h1>Packet at a glance</h1>
+          <p class="muted">Quick actions, confirmed paths, favorites, and stations worth retesting.</p>
+          <div class="quick-grid">
+            <button id="fieldWorkedBtn" class="quick-action"><span>✓</span><b>Log worked</b></button>
+            <button id="fieldFailedBtn" class="quick-action"><span>×</span><b>Log failed</b></button>
+            <button id="fieldRouteBtn" class="quick-action"><span>↝</span><b>Find route</b></button>
+            <button id="fieldDiscoverBtn" class="quick-action"><span>⌁</span><b>Discover</b></button>
+          </div>
+        </div>
+
+        <div class="section-heading"><div><h2>Favorites</h2><p class="muted small">One-tap station details.</p></div></div>
+        <div id="favoriteList" class="compact-grid"></div>
+
+        <div class="section-heading"><div><h2>Retest queue</h2><p class="muted small">Watched, failed, or stale records.</p></div><span id="retestCount" class="badge"></span></div>
+        <div id="retestList" class="card-list"></div>
+
+        <div class="section-heading"><div><h2>Recent activity</h2></div></div>
+        <div id="recentList" class="card-list"></div>
+      </section>
+
+      <section id="directoryView" class="view" aria-labelledby="directoryTab">
         <div class="search-wrap">
-          <input id="searchInput" type="search" placeholder="Search callsign, alias, type, note…" autocomplete="off" />
+          <input id="searchInput" type="search" placeholder="Search call, alias, frequency, service…" autocomplete="off" />
           <button id="addStationBtn" class="primary-btn">+ Station</button>
         </div>
-        <div id="filterBar" class="chips" aria-label="Directory filters"></div>
+        <div class="toolbar-row">
+          <div id="filterBar" class="chips" aria-label="Directory filters"></div>
+          <select id="sortSelect" class="mini-select" aria-label="Sort directory">
+            <option value="name">Name</option>
+            <option value="recent">Last tested</option>
+            <option value="frequency">Frequency</option>
+            <option value="distance">Distance</option>
+          </select>
+        </div>
         <div class="section-heading">
-          <h2>Directory</h2>
-          <span id="stationCount" class="muted"></span>
+          <div><h2>Directory</h2><p id="locationStatus" class="muted small">Distance sorting needs station coordinates.</p></div>
+          <div class="heading-actions"><span id="stationCount" class="muted small"></span><button id="locateBtn" class="secondary-btn compact-btn">Near me</button></div>
         </div>
         <div id="stationList" class="card-list"></div>
       </section>
 
       <section id="mapView" class="view" aria-labelledby="mapTab">
         <div class="section-heading">
-          <div>
-            <h2>Network Map</h2>
-            <p class="muted">Known routes from your field observations.</p>
-          </div>
-          <button id="fitMapBtn" class="secondary-btn">Reset view</button>
+          <div><h2>Network Graph</h2><p class="muted">Tap nodes for details. Solid links are confirmed; dashed links need caution.</p></div>
+          <button id="fitMapBtn" class="secondary-btn compact-btn">Reset</button>
         </div>
-        <div class="map-card">
-          <svg id="networkSvg" viewBox="0 0 900 620" role="img" aria-label="Packet network route graph"></svg>
+        <div class="legend-row"><span>○ Node</span><span>□ BBS</span><span>◇ Chat</span><span>★ Favorite</span></div>
+        <div class="map-card"><svg id="networkSvg" viewBox="0 0 1000 720" role="img" aria-label="Packet network route graph"></svg></div>
+      </section>
+
+      <section id="routeView" class="view" aria-labelledby="routeTab">
+        <div class="section-heading"><div><h2>Path Finder</h2><p class="muted">Uses your locally confirmed route records — not RF propagation predictions.</p></div><button id="addRouteBtn" class="primary-btn">+ Route</button></div>
+        <div class="route-finder-card">
+          <label>Start<select id="routeStartSelect"></select></label>
+          <label>Destination<select id="routeDestinationSelect"></select></label>
+          <div class="route-options"><label class="check-label"><input id="confirmedOnlyCheck" type="checkbox" checked /> Confirmed links only</label><button id="findPathBtn" class="primary-btn">Find best path</button></div>
+          <div id="pathResult" class="path-result"></div>
         </div>
-        <p class="small muted">Tap a node for details. Dashed links are unconfirmed or failed routes.</p>
+        <div class="section-heading"><div><h2>Saved routes</h2><p class="muted small">Multiple paths can point to the same destination.</p></div></div>
+        <div id="routeList" class="card-list"></div>
       </section>
 
       <section id="logView" class="view" aria-labelledby="logTab">
-        <div class="section-heading">
-          <div>
-            <h2>Field Log</h2>
-            <p class="muted">Fast notes about what worked and what didn’t.</p>
-          </div>
-          <button id="addLogBtn" class="primary-btn">+ Log</button>
-        </div>
+        <div class="section-heading"><div><h2>Connection History</h2><p class="muted">Equipment, route, frequency, power, result, notes, and optional evidence.</p></div><button id="addLogBtn" class="primary-btn">+ Log</button></div>
         <div id="logList" class="card-list"></div>
       </section>
 
       <section id="referenceView" class="view" aria-labelledby="referenceTab">
-        <div class="section-heading">
-          <div>
-            <h2>Quick Reference</h2>
-            <p class="muted">Common packet/node/BBS commands. Exact behavior varies by software.</p>
-          </div>
-        </div>
+        <div class="section-heading"><div><h2>Command Library</h2><p class="muted">Choose the software family you encounter.</p></div><button id="equipmentBtn" class="secondary-btn compact-btn">Equipment</button></div>
+        <div id="commandProfileBar" class="chips"></div>
         <div id="referenceList" class="reference-grid"></div>
       </section>
     </main>
 
-    <nav class="tabbar" aria-label="Primary">
-      <button id="directoryTab" class="tab active" data-view="directoryView"><span>⌕</span>Directory</button>
-      <button id="mapTab" class="tab" data-view="mapView"><span>⌘</span>Map</button>
+    <nav class="tabbar" aria-label="Primary navigation">
+      <button id="fieldTab" class="tab active" data-view="fieldView"><span>⌾</span>Field</button>
+      <button id="directoryTab" class="tab" data-view="directoryView"><span>⌕</span>Directory</button>
+      <button id="mapTab" class="tab" data-view="mapView"><span>◎</span>Graph</button>
+      <button id="routeTab" class="tab" data-view="routeView"><span>↝</span>Routes</button>
       <button id="logTab" class="tab" data-view="logView"><span>✎</span>Log</button>
       <button id="referenceTab" class="tab" data-view="referenceView"><span>?</span>Commands</button>
     </nav>
@@ -82,82 +117,103 @@
 
   <dialog id="stationDialog" class="sheet">
     <form id="stationForm" method="dialog">
-      <div class="sheet-head">
-        <div>
-          <p class="eyebrow">STATION RECORD</p>
-          <h2 id="stationDialogTitle">Add station</h2>
-        </div>
-        <button type="button" class="icon-btn close-dialog">×</button>
-      </div>
+      <div class="sheet-head"><div><p class="eyebrow">STATION RECORD</p><h2 id="stationDialogTitle">Add station</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
       <input type="hidden" id="stationId" />
       <div class="form-grid">
-        <label>Callsign / primary name<input id="stationCall" required placeholder="WR5GC" /></label>
-        <label>Alias<input id="stationAlias" placeholder="BIGBOY" /></label>
-        <label>Type
-          <select id="stationType">
-            <option>Node</option><option>BBS</option><option>Chat</option><option>Digipeater</option><option>Other</option>
-          </select>
-        </label>
-        <label>Status
-          <select id="stationStatus">
-            <option value="worked">Worked</option>
-            <option value="observed">Observed</option>
-            <option value="failed">No response</option>
-            <option value="unknown">Unknown</option>
-          </select>
-        </label>
-        <label>Frequency<input id="stationFrequency" placeholder="e.g. 145.050 MHz" /></label>
+        <label>Callsign / primary name<input id="stationCall" required placeholder="WR5GC" autocapitalize="characters" /></label>
+        <label>Aliases<input id="stationAliases" placeholder="BIGBOY, GC" autocapitalize="characters" /></label>
+        <label>Type<select id="stationType"><option>Node</option><option>BBS</option><option>Chat</option><option>Digipeater</option><option>Gateway</option><option>Other</option></select></label>
+        <label>Status<select id="stationStatus"><option value="worked">Worked</option><option value="observed">Observed</option><option value="failed">No response</option><option value="unknown">Unknown</option></select></label>
+        <label>Confidence<select id="stationConfidence"><option value="confirmed">Confirmed by me</option><option value="reported">Reported by operator</option><option value="directory">Directory / published</option><option value="unknown">Unknown</option></select></label>
+        <label>Software / profile<select id="stationSoftware"><option value="General">General / unknown</option><option value="BPQ">BPQ</option><option value="KA-Node">KA-Node</option><option value="FBB">FBB BBS</option><option value="Chat">Chat</option></select></label>
+        <label>Frequency<input id="stationFrequency" placeholder="145.050 MHz" /></label>
+        <label>Baud<input id="stationBaud" inputmode="numeric" placeholder="1200" /></label>
         <label>Last tested<input id="stationLastTested" type="date" /></label>
+        <label>Last heard<input id="stationLastHeard" type="datetime-local" /></label>
+        <label>Grid square<input id="stationGrid" placeholder="EL29…" autocapitalize="characters" /></label>
+        <label>Latitude<input id="stationLat" type="number" step="any" placeholder="29.7604" /></label>
+        <label>Longitude<input id="stationLon" type="number" step="any" placeholder="-95.3698" /></label>
+        <label>Location label<input id="stationLocation" placeholder="Houston / Lake City…" /></label>
+        <label>Sysop<input id="stationSysop" placeholder="Callsign or name" /></label>
       </div>
-      <label>Known route / connect path<input id="stationRoute" placeholder="HOME → BIGBOY → FOXHOP" /></label>
-      <label>Commands<textarea id="stationCommands" rows="3" placeholder="C FOXHOP\nJ"></textarea></label>
-      <label>Notes<textarea id="stationNotes" rows="5" placeholder="Field observations…"></textarea></label>
-      <div class="sheet-actions">
-        <button type="button" id="deleteStationBtn" class="danger-btn hidden">Delete</button>
-        <span class="spacer"></span>
-        <button type="button" class="secondary-btn close-dialog">Cancel</button>
-        <button type="submit" class="primary-btn">Save</button>
-      </div>
+      <label>Services<input id="stationServices" placeholder="BBS, CHAT, RMS, NODE" /></label>
+      <label>Quick commands<textarea id="stationCommands" rows="3" placeholder="C FOXHOP\nJ"></textarea></label>
+      <div id="bbsFields" class="service-fields hidden"><h3>BBS details</h3><div class="form-grid"><label>BBS name<input id="stationBbsName" /></label><label>Message areas<input id="stationBbsAreas" placeholder="LOCAL, ALL, EMCOMM" /></label><label>Last login<input id="stationBbsLastLogin" type="datetime-local" /></label><label>Message waiting<select id="stationBbsWaiting"><option value="unknown">Unknown</option><option value="no">No</option><option value="yes">Yes</option></select></label><label>Forwarding partners<input id="stationBbsPartners" placeholder="CALL1, CALL2" /></label><label>Latest messages seen<input id="stationBbsLatest" placeholder="Numbers/topics or short note" /></label></div><label>BBS notes<textarea id="stationBbsNotes" rows="3"></textarea></label></div>
+      <div id="chatFields" class="service-fields hidden"><h3>Chat details</h3><div class="form-grid"><label>Last activity<input id="stationChatLastActivity" type="datetime-local" /></label><label>Known regulars<input id="stationChatRegulars" placeholder="Calls separated by commas" /></label></div><label>Join / leave instructions<textarea id="stationChatInstructions" rows="3" placeholder="How to enter, identify, and leave the room"></textarea></label><label>Chat notes<textarea id="stationChatNotes" rows="3"></textarea></label></div>
+      <label>General notes<textarea id="stationNotes" rows="5" placeholder="Field observations…"></textarea></label>
+      <div class="inline-options"><label class="check-label"><input id="stationFavorite" type="checkbox" /> Favorite</label><label class="check-label"><input id="stationWatch" type="checkbox" /> Watch / retest</label></div>
+      <div class="sheet-actions"><button type="button" id="deleteStationBtn" class="danger-btn hidden">Delete</button><span class="spacer"></span><button type="button" class="secondary-btn close-dialog">Cancel</button><button type="submit" class="primary-btn">Save</button></div>
     </form>
   </dialog>
 
   <dialog id="logDialog" class="sheet">
     <form id="logForm" method="dialog">
-      <div class="sheet-head">
-        <div><p class="eyebrow">FIELD NOTE</p><h2>Add log entry</h2></div>
-        <button type="button" class="icon-btn close-dialog">×</button>
-      </div>
+      <div class="sheet-head"><div><p class="eyebrow">FIELD NOTE</p><h2>Add connection</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
       <div class="form-grid">
         <label>Date & time<input id="logDate" type="datetime-local" required /></label>
-        <label>Station<input id="logStation" placeholder="TARNOD" /></label>
-        <label>Status
-          <select id="logStatus"><option value="worked">Worked</option><option value="failed">No response</option><option value="observed">Observed</option></select>
-        </label>
-        <label>Route<input id="logRoute" placeholder="via BIGBOY" /></label>
+        <label>Station<select id="logStation"></select></label>
+        <label>Status<select id="logStatus"><option value="worked">Worked</option><option value="failed">No response</option><option value="observed">Observed</option></select></label>
+        <label>Route<select id="logRoute"></select></label>
+        <label>Equipment<select id="logEquipment"></select></label>
+        <label>Power<input id="logPower" placeholder="5 W" /></label>
+        <label>Frequency<input id="logFrequency" placeholder="145.050 MHz" /></label>
+        <label>Location<input id="logLocation" placeholder="Home / Jeep / field" /></label>
       </div>
-      <label>Note<textarea id="logNote" rows="5" required placeholder="What happened?"></textarea></label>
+      <label>Note<textarea id="logNote" rows="4" required placeholder="What happened?"></textarea></label>
+      <label>Screenshot / photo <span class="muted">(compressed locally)</span><input id="logImage" type="file" accept="image/*" /></label>
+      <div id="imagePreviewWrap" class="image-preview hidden"><img id="imagePreview" alt="Log attachment preview" /><button type="button" id="clearImageBtn" class="danger-btn compact-btn">Remove</button></div>
       <div class="sheet-actions"><span class="spacer"></span><button type="button" class="secondary-btn close-dialog">Cancel</button><button type="submit" class="primary-btn">Save</button></div>
     </form>
   </dialog>
 
-  <dialog id="detailDialog" class="sheet detail-sheet">
-    <div id="detailContent"></div>
+  <dialog id="routeDialog" class="sheet">
+    <form id="routeForm" method="dialog">
+      <div class="sheet-head"><div><p class="eyebrow">ROUTE RECORD</p><h2 id="routeDialogTitle">Add route</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
+      <input type="hidden" id="routeId" />
+      <div class="form-grid">
+        <label>Destination<select id="routeDestination"></select></label>
+        <label>Status<select id="routeStatus"><option value="worked">Worked</option><option value="observed">Observed</option><option value="failed">Failed</option><option value="unknown">Unknown</option></select></label>
+        <label>Last tested<input id="routeLastTested" type="date" /></label>
+        <label>Source<select id="routeSource"><option value="confirmed">Confirmed by me</option><option value="reported">Reported</option><option value="directory">Directory / published</option><option value="unknown">Unknown</option></select></label>
+      </div>
+      <label>Path<input id="routePath" required placeholder="HOME → BIGBOY → LCCHAT" autocapitalize="characters" /></label>
+      <label>Connect commands<textarea id="routeCommands" rows="4" placeholder="C BIGBOY\nC LCCHAT"></textarea></label>
+      <label>Notes<textarea id="routeNotes" rows="4"></textarea></label>
+      <div class="sheet-actions"><button type="button" id="deleteRouteBtn" class="danger-btn hidden">Delete</button><span class="spacer"></span><button type="button" class="secondary-btn close-dialog">Cancel</button><button type="submit" class="primary-btn">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" class="sheet detail-sheet"><div id="detailContent"></div></dialog>
+
+  <dialog id="equipmentDialog" class="sheet">
+    <div class="sheet-head"><div><p class="eyebrow">RADIO SETUPS</p><h2>Equipment profiles</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
+    <div id="equipmentList" class="card-list"></div>
+    <form id="equipmentForm" class="subform"><input type="hidden" id="equipmentId" /><div class="form-grid"><label>Name<input id="equipmentName" required placeholder="UV-PRO handheld" /></label><label>Power<input id="equipmentPower" placeholder="5 W" /></label><label>Antenna<input id="equipmentAntenna" placeholder="Signal Stick / Jeep mobile…" /></label><label>Interface / app<input id="equipmentInterface" placeholder="Packet Commander / DigiRig…" /></label></div><label>Notes<input id="equipmentNotes" /></label><div class="sheet-actions"><button type="button" id="equipmentClearBtn" class="secondary-btn">Clear</button><span class="spacer"></span><button class="primary-btn" type="submit">Save profile</button></div></form>
+  </dialog>
+
+  <dialog id="discoverDialog" class="sheet">
+    <div class="sheet-head"><div><p class="eyebrow">DISCOVERY MODE</p><h2>Parse terminal output</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
+    <p class="muted">Paste output from <code>J</code>, <code>NODES</code>, <code>MHEARD</code>, or a similar command. Candidates are suggestions only — review them before saving.</p>
+    <label>Terminal output<textarea id="discoverText" rows="9" placeholder="Paste packet text here…"></textarea></label>
+    <button id="parseDiscoverBtn" class="primary-btn wide">Find station-like names</button>
+    <div id="discoverResults" class="discover-results"></div>
   </dialog>
 
   <dialog id="toolsDialog" class="sheet">
-    <div class="sheet-head">
-      <div><p class="eyebrow">DATA TOOLS</p><h2>Backup & install</h2></div>
-      <button type="button" class="icon-btn close-dialog">×</button>
-    </div>
+    <div class="sheet-head"><div><p class="eyebrow">LOCAL DATA & APP</p><h2>Tools</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
     <div class="tool-stack">
-      <button id="exportBtn" class="secondary-btn wide">Export JSON backup</button>
-      <label class="secondary-btn wide file-label">Import JSON backup<input id="importInput" type="file" accept="application/json" hidden /></label>
+      <div class="tool-section"><h3>Backups</h3><button id="exportBtn" class="secondary-btn wide">Export full JSON backup</button><button id="exportCsvBtn" class="secondary-btn wide">Export CSV tables</button><label class="secondary-btn wide file-label">Import JSON backup<input id="importInput" type="file" accept="application/json" hidden /></label><label class="secondary-btn wide file-label">Import exported CSV table<input id="csvImportInput" type="file" accept="text/csv,.csv" hidden /></label></div>
+      <div class="tool-section"><h3>Display</h3><label class="check-label"><input id="redModeCheck" type="checkbox" /> Red-light field mode</label><label>Stale after<select id="staleDaysSelect"><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label></div>
+      <div class="install-note"><strong>Install on iPhone</strong><p>Open the GitHub Pages site in Safari → Share → <b>Add to Home Screen</b>. The app shell and your local records remain available offline after loading.</p></div>
+      <div class="privacy-note"><strong>Local by design</strong><p>No account or cloud sync. Location is requested only when you tap <b>Near me</b>. Attachments and records remain in this browser's local storage.</p></div>
       <button id="resetBtn" class="danger-btn wide">Reset to starter data</button>
-      <div class="install-note">
-        <strong>Install on iPhone</strong>
-        <p>Open the deployed site in Safari → Share → <b>Add to Home Screen</b>. Once loaded, the directory and saved data work offline.</p>
-      </div>
+      <div class="about-card"><span class="brand-mark large"><span>HP</span><small>TH</small></span><div><strong>Houston Packet Field</strong><p>Version <span id="aboutVersion">2.0.0</span><br />Developed by <b>Thomas Hopkins</b></p></div></div>
     </div>
+  </dialog>
+
+  <dialog id="aboutDialog" class="sheet">
+    <div class="sheet-head"><div><p class="eyebrow">ABOUT</p><h2>Houston Packet Field</h2></div><button type="button" class="icon-btn close-dialog">×</button></div>
+    <div class="about-hero"><span class="brand-mark huge"><span>HP</span><small>TH</small></span><h3>Houston Packet</h3><p>Offline packet-radio network notebook, route finder, and field log.</p><p class="developer-line">Designed & developed by <strong>Thomas Hopkins</strong></p></div>
   </dialog>
 
   <script src="app.js"></script>
